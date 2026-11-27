@@ -12,7 +12,7 @@ release is personal and carries all data, plot values included.
 | 5 | Text and labels: SDF glyph atlas in the map pass, collision, curved road labels, icons atlas | 3 | first cut done (PR 1): atlas, collision, fades, curved line labels, icons; road labels wait for road tiles |
 | 6 | Map quality: line joins and caps, dashes, hatching for no data, hover and selection outlines, raster tiles (hillshade, solar) | 2 | |
 | 7 | Real packs from the data store: admin with wards and suburbs, grid, parcels per province, places, h3; `export_tiles.py` and `export_pack.py` feeding `installed.json` | 2 | first cut done (PR 2): zoom-band exporter, per-province plot packs, `build_packs.py` release with manifest and installed.json |
-| 8 | Plot level: parcel tiles z13-16, plot card from the SQLite pack, search by erf | 1.5 | back-end done (PR 2): `/v1/parcels/{sg21}`; app card to do |
+| 8 | Plot level: parcel tiles z13-16, plot card from the SQLite pack, search by erf | 1.5 | back-end done (PR 2): `/v1/parcels/{sg21}`, per-province plot packs at z12-14; app card to switch to the route |
 | 9 | Functions of the v7 model: DES, CHK, NEAR, RANK, CMP, LIST, CONN, FOLLOW, MEAS, command line | 3 | |
 | 10 | 3D: terrain mesh from raster PMTiles, camera pitch and orbit, planes at altitude | 3 | |
 | 11 | Update system: signed manifest, per-province deltas, atomic swap, rollback, beta and stable, Update data screen, app self-update | 2 | |

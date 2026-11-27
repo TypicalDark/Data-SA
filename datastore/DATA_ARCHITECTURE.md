@@ -101,7 +101,7 @@ The zoom band table says which semantic level lives in which zoom levels of the 
 | 3 | Municipality | `WC053`, `CPT` | 5 to 12 | ~50 m |
 | 4 | Ward | `W10503001` | 8 to 14 | full |
 | 6 | Suburb / sub place | `SSGT0JR0352` | 11 to 14 | full |
-| 7 | Parcel (in `core.parcel`) | `C02900020000000400000` | 13 to 16, overzoomed after | full |
+| 7 | Parcel (in `core.parcel`) | `C02900020000000400000` | 12 to 14, overzoomed after | full |
 
 Level 5 (Stats SA main place) is reserved. Labels have their own layer with a start zoom per level.
 These bands live in the `meta.tile_layer` table, so changing them is a row edit, not a code change.
@@ -254,7 +254,7 @@ The project folder holds 9.2 of its 10 GB and cannot take the raw archive or the
 |---|---|---|---|
 | Raw archive | 12 GB without the big sets, about 25-30 GB with DFFE erven, OpenSky and Copernicus | your PC, for example `D:\GridOfSA\raw` | external drive, or a private Cloudflare R2 / Backblaze B2 bucket (about R10 per month for 30 GB) |
 | PostGIS database | about 25-35 GB with 9 M parcels and indexes (9 M parcels at about 2 KB each, 2.9 M roll rows, 21 M climate values) | your PC (Docker) | rebuildable from the archive; `pg_dump` weekly |
-| PMTiles + SQLite packs (one release) | 5.3 GB national: plot tiles 1.9 GB in nine province packs, attribute pack 3.2 GB, the rest 0.2 GB | cloud bucket for the app, copy on your PC | the bucket |
+| PMTiles + SQLite packs (one release) | 4.4 GB national: plot tiles 0.96 GB in nine province packs, attribute pack 3.2 GB, the rest 0.2 GB | cloud bucket for the app, copy on your PC | the bucket |
 | This spec and the scripts | under 1 MB | the Data-SA repository, `datastore/` | GitHub |
 
 What this means for the project folder: once the archive and database exist on your PC, the processed
@@ -293,9 +293,9 @@ PostgreSQL 16.10, PostGIS 3.4, pgRouting 3.6, h3-pg 4.1, tippecanoe 2.49, on the
 | Plots | 8,881,163 unique SG parcels in 256 files; 98.7% placed in a ward, 95.5% in a suburb | 60 min load + 50 min tree build |
 | Database | 20 GB on disk with indexes | |
 | Roll-ups | plots and median values at every level, e.g. Gauteng 2.42 M plots, median R510,000; national median R240,000 | in the tree build |
-| Tiles | admin 96 MB, grid 19 MB, h3 68 MB, places 0.4 MB, plots 1.92 GB in nine province packs (Gauteng 286 MB largest, Mpumalanga 147 MB smallest) | 35 min |
+| Tiles | admin 96 MB, grid 19 MB, h3 68 MB, places 0.4 MB, plots 0.96 GB in nine province packs at z12-14 (Gauteng 214 MB largest, North West 64 MB smallest; 1.92 GB when cut to z16) | 35 min |
 | Attribute pack | 3.2 GB: plots 1.15 GB, search 1 GB, valuations 0.4 GB, packed climate 0.15 GB | 4 min |
-| Release | 15 packs, 5.34 GB, served by `gsa-backend`; plot card in 8 ms, FEED trace in under 40 ms | |
+| Release | 15 packs, 4.4 GB, served by `gsa-backend`; plot card in 8 ms, FEED trace in under 40 ms | |
 
 Next size win: split the attribute pack's plot, valuation and plot-search rows per province like the tiles,
 so a user who installs one province downloads about a ninth of the 2.7 GB plot part.

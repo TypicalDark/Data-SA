@@ -11,7 +11,7 @@ exports: a release folder made by `datastore/export/build_packs.py`.
 | `admin` | PMTiles, MVT | `export_tiles.py --pack admin` | province, district, municipality, ward, suburb, label |
 | `grid` | PMTiles, MVT | `export_tiles.py --pack grid` | line, facility |
 | `parcels` | PMTiles, MVT | `tools/webpack/build_parcels_pack.py` (until the store's `export_tiles.py --pack parcels`) | parcel: sg21, type, label, town, area, muni, and where a roll matched value, cat, use, sale, sale_date, roll (plus address and zoning from Joburg's roll); zoom 12-14, about 9M plots |
-| `parcels-<prov>` (`parcels-wc`, `parcels-gt`, ...) | PMTiles, MVT | `datastore/export/export_tiles.py --pack parcels` (replaces `parcels` once the app reads per-province packs) | parcel, z13-16, one pack per province (`region` in installed.json) |
+| `parcels-<prov>` (`parcels-wc`, `parcels-gt`, ...) | PMTiles, MVT | `datastore/export/export_tiles.py --pack parcels` (replaces `parcels` once the app reads per-province packs) | parcel, same layer, zooms (12-14) and properties as `parcels` plus `ward`; one pack per province (`region` in installed.json), 0.96 GB together |
 | `h3`, `places` | PMTiles, MVT | `export_tiles.py` | hex, place |
 | `web-grid`, `web-water`, `web-risk`, `web-nature`, `web-vote`, `web-prop`, `web-land`, `web-places`, `web-move` | PMTiles, MVT | `tools/webpack/build_web_packs.py` | the website map's layers, one vector layer per website layer id (`x:pa` is `x_pa`) |
 | `raster-relief`, `raster-fire`, ... (ten) | PMTiles, PNG | `tools/webpack/build_raster_packs.py` | the website's images as 256 px tiles |

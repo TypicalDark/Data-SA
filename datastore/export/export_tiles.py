@@ -43,10 +43,20 @@ LAYERS = [
         'kv',n.kv[array_upper(n.kv,1)],'operator',n.operator,'mva',n.capacity_mva)), n.geom,
         CASE WHEN n.kv[array_upper(n.kv,1)] >= 220 OR n.kind='power_station' THEN 4 WHEN n.kv[array_upper(n.kv,1)] >= 66 THEN 7 ELSE 10 END, 14
    FROM net.node n WHERE n.network='power' AND n.kind <> 'endpoint'""", ["-r1"]),
- ("parcel", "parcels", """SELECT p.sg21, jsonb_strip_nulls(jsonb_build_object('id',p.sg21,'kind',p.kind,'ward',p.ward_id,'area_m2',round(p.area_m2::numeric),
-        'value',v.value,'sale',v.sale,'cat',v.cat)), p.geom, 13, 16
-   FROM core.parcel p LEFT JOIN LATERAL (SELECT sum(market_value) value, max(sale_price) sale, max(category) cat FROM core.valuation
-        WHERE sg21=p.sg21 AND coalesce(value_flag,'')<>'zero') v ON true {split}""", ["--no-feature-limit", "--no-tile-size-limit"]),
+ # Same layer name, zooms (12-14, overzoomed after) and property names as tools/webpack/build_parcels_pack.py,
+ # so the app reads either pack.
+ ("parcel", "parcels", """SELECT p.sg21, jsonb_strip_nulls(jsonb_build_object('sg21',p.sg21,'type',p.kind,
+        'label', CASE WHEN p.kind IN ('farm','farm_portion')
+                      THEN CASE WHEN coalesce(ltrim(p.portion_no,'0'),'') <> '' THEN 'Ptn '||ltrim(p.portion_no,'0')||' of ' ELSE '' END
+                           || coalesce(p.farm_name, ltrim(p.parcel_no,'0'))
+                      ELSE 'Erf '||coalesce(nullif(ltrim(p.parcel_no,'0'),''), p.parcel_no)
+                           || CASE WHEN coalesce(ltrim(p.portion_no,'0'),'') <> '' THEN ' ptn '||ltrim(p.portion_no,'0') ELSE '' END END,
+        'town',coalesce(p.town,p.farm_name),'area',round(p.area_m2::numeric,1),'muni',p.muni_id,'scheme',p.scheme,'ward',p.ward_id,
+        'value',v.value,'cat',v.cat,'use',v.use,'sale',v.sale,'sale_date',v.sale_date,'roll',v.roll)), p.geom, 12, 14
+   FROM core.parcel p LEFT JOIN LATERAL (
+        SELECT sum(market_value) value, max(category) cat, max(usage) use, max(sale_price) sale, max(sale_date)::text sale_date,
+               max(muni_code || ' ' || roll_period) roll
+        FROM core.valuation WHERE sg21=p.sg21 AND coalesce(value_flag,'')<>'zero') v ON true {split}""", ["--no-feature-limit", "--no-tile-size-limit"]),
  ("hex", "h3", """SELECT h.h3::text || ':' || h.metric, jsonb_build_object('h3',h.h3::text,'res',h.res,'metric',h.metric,'v',round(h.v::numeric),'n',h.n),
         h3_cell_to_boundary_geometry(h.h3),
         CASE h.res WHEN 5 THEN 4 WHEN 6 THEN 6 WHEN 7 THEN 8 WHEN 8 THEN 10 ELSE 11 END,
