@@ -268,6 +268,8 @@ bool pass_ward(const Filters& f, const std::string& party, double turnout, const
   return true;
 }
 
+bool is_plot_pack(const std::string& id) { return id == "parcels" || id.rfind("parcels-", 0) == 0; }
+
 std::string raster_pack(const std::string& id) {
   static const std::set<std::string> raster = {"relief", "x:fire", "x:flood", "x:ships", "x:farms", "x:rain12", "x:rainn",
                                              "x:pvout", "x:ghi", "x:roof"};
@@ -302,7 +304,7 @@ std::set<std::string> available(const std::vector<std::string>& packs, const std
     if (p == "grid") a.insert({"lines", "subs", "plants"});
     if (p == "base") a.insert({"streets", "pois"});
     if (p == "buildings") a.insert("buildings");
-    if (p == "parcels") a.insert("parcels");
+    if (is_plot_pack(p)) a.insert("parcels");
   }
   std::set<std::string> names;
   for (const auto& [pack, ls] : pack_layers)
@@ -322,7 +324,11 @@ std::set<std::string> packs_needed(const State& s, const std::map<std::string, s
     for (const auto& [pack, ls] : pack_layers)
       if (pack.rfind("web-", 0) == 0 && std::find(ls.begin(), ls.end(), n) != ls.end()) want.insert(pack);
     if (pack_layers.count(raster_pack(id))) want.insert(raster_pack(id));
-    if (id == "parcels" && pack_layers.count("parcels")) want.insert("parcels");
+    if (id == "parcels") {
+      const bool national = pack_layers.count("parcels") != 0;
+      for (const auto& [pack, ls] : pack_layers)
+        if (national ? pack == "parcels" : is_plot_pack(pack)) want.insert(pack);
+    }
   }
   if (s.terrain && pack_layers.count("raster-relief")) want.insert("raster-relief");
   return want;

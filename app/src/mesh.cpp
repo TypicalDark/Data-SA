@@ -195,7 +195,7 @@ void build(const std::string& pack, const mvt::Tile& tile, const layers::MapStyl
     if (ms.roads) base_map(tile, z < 10, out);
     return;
   }
-  if (pack.rfind("web-", 0) == 0 || pack == "parcels") {
+  if (pack.rfind("web-", 0) == 0 || layers::is_plot_pack(pack)) {
     // website layers: areas tinted with an outline, lines, and points as small squares
     for (const auto& e : ms.extra) {
       const auto* l = tile.layer(e.layer);

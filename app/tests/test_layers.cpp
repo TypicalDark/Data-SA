@@ -83,6 +83,13 @@ TEST_CASE("layer state: one choropleth, hide, remove, topics") {
     REQUIRE(!pm.extra.empty());
     CHECK(pm.extra.back().mode == layers::Extra::Plots);
     CHECK(pm.extra.back().layer == "parcel");
+    // the store's per-province packs, used when there is no national pack
+    const std::map<std::string, std::vector<std::string>> prov = {{"parcels-gp", {"parcel"}}, {"parcels-wc", {"parcel"}}};
+    CHECK(layers::available({"admin", "parcels-gp"}, prov).count("parcels"));
+    CHECK(layers::packs_needed(ps, prov).size() == 2);
+    auto both = prov;
+    both["parcels"] = {"parcel"};
+    CHECK(layers::packs_needed(ps, both) == std::set<std::string>{"parcels"});
     CHECK(style::value_band(50000).packed() == style::hex("#c6dbef").packed());
     CHECK(style::value_band(1500000).packed() == style::hex("#f2a65a").packed());
     CHECK(style::value_band(9e6).packed() == style::hex("#9c1f1f").packed());

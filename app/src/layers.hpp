@@ -77,6 +77,10 @@ std::set<std::string> available(const std::vector<std::string>& packs,
 // The website-layer packs ("web-..." and "raster-...") that hold a layer the state shows.
 std::set<std::string> packs_needed(const State& s, const std::map<std::string, std::vector<std::string>>& pack_layers);
 
+// Plot packs: the national `parcels` pack, or the data store's per-province `parcels-<prov>` packs
+// (same layer and properties). When both are installed the national pack wins.
+bool is_plot_pack(const std::string& id);
+
 // The image-tile pack that draws a layer ("relief" -> "raster-relief", "x:fire" -> "raster-fire").
 std::string raster_pack(const std::string& id);
 // How opaque the website draws a raster layer at a zoom.
