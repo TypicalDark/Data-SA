@@ -32,6 +32,12 @@ bool has_table(sql::Db& db, const std::string& name) {
   return found;
 }
 
+bool has_column(sql::Db& db, const std::string& table, const std::string& column) {
+  bool hit = false;
+  db.query("SELECT 1 FROM pragma_table_info(?) WHERE name = ?", {table, column}, [&](const sql::Row&) { hit = true; });
+  return hit;
+}
+
 // Optional integer query parameter; false (and a 400 already sent) when it is not a number in range.
 bool int_param(const httplib::Request& req, httplib::Response& res, const char* name, int64_t lo, int64_t hi,
                std::optional<int64_t>& out) {
@@ -93,15 +99,37 @@ json node_json(const graph::Graph& g, int i) {
 }
 
 // ------------------------------------------------------------------ handlers
+// The pack that holds a plot: the province packs first, then the national pack (a single-file
+// install keeps plots there). Returns null when no installed pack has it.
+std::shared_ptr<sql::Pool> plot_pack(const PackSet& set, const std::string& sg21) {
+  std::vector<std::shared_ptr<sql::Pool>> pools;
+  for (const auto& [region, pool] : set.regional) pools.push_back(pool);
+  if (set.db) pools.push_back(set.db);
+  for (const auto& pool : pools) {
+    auto db = pool->lease();
+    if (!has_table(*db, "parcel")) continue;
+    bool hit = false;
+    db->query("SELECT 1 FROM parcel WHERE sg21 = ?", {sg21}, [&](const sql::Row&) { hit = true; });
+    if (hit) return pool;
+  }
+  return nullptr;
+}
+
 void handle_parcel(const PackSet& set, const std::string& sg21, httplib::Response& res) {
-  auto db = set.db->lease();
-  if (!has_table(*db, "parcel")) return send_error(res, 503, "the installed pack has no plots");
+  const auto pool = plot_pack(set, sg21);
+  if (!pool) {
+    bool any = false;
+    for (const auto& [region, p] : set.regional) any = any || has_table(*p->lease(), "parcel");
+    if (!any && !has_table(*set.db->lease(), "parcel")) return send_error(res, 503, "the installed packs have no plots");
+    return send_error(res, 404, "no plot " + sg21 + " in the installed provinces");
+  }
+  auto db = pool->lease();
   json out;
-  bool found = false;
   std::string ward, suburb;
-  db->query("SELECT sg21, kind, town, parcel_no, portion_no, area_m2, ward_id, suburb_id, h3_r9, lon, lat FROM parcel WHERE sg21 = ?",
+  const bool rich = has_column(*db, "parcel", "stand");  // packs built before migration 002 lack stand/superseded_by
+  db->query(std::string("SELECT sg21, kind, town, parcel_no, portion_no, area_m2, ward_id, suburb_id, h3_r9, lon, lat") +
+                (rich ? ", stand, superseded_by" : "") + " FROM parcel WHERE sg21 = ?",
             {sg21}, [&](const sql::Row& r) {
-              found = true;
               out = json{{"sg21", r.text(0)}, {"kind", "PLOT"}};
               if (!r.is_null(1)) out["parcel_kind"] = r.text(1);
               if (!r.is_null(2)) out["town"] = r.text(2);
@@ -110,47 +138,65 @@ void handle_parcel(const PackSet& set, const std::string& sg21, httplib::Respons
               if (!r.is_null(5)) out["area_m2"] = r.f64(5);
               if (!r.is_null(8)) out["h3_r9"] = r.text(8);
               if (!r.is_null(9)) out["center"] = {r.f64(9), r.f64(10)};
+              if (rich && !r.is_null(11)) out["stand"] = r.text(11);
+              // an older SG parcel replaced by a newer metro stand: the map draws the stand instead
+              if (rich && !r.is_null(12)) out["superseded_by"] = r.text(12);
               ward = r.opt_text(6).value_or("");
               suburb = r.opt_text(7).value_or("");
             });
-  if (!found) return send_error(res, 404, "no plot " + sg21);
   // the SG code is a tree too: registration division / township / parcel / portion
   out["sg"] = {{"division", sg21.substr(0, 4)}, {"township", sg21.substr(0, 8)}, {"parcel", sg21.substr(0, 16)}};
 
-  // breadcrumb: the ward's chain from the place tree, then the suburb
+  // breadcrumb: the ward's chain from the place tree (national pack), then the suburb
   json crumbs = json::array();
-  std::string up = ward;
-  for (int guard = 0; guard < 10 && !up.empty(); ++guard) {
-    std::string next;
-    db->query("SELECT area_id, level, name, parent_id FROM tree WHERE area_id = ?", {up}, [&](const sql::Row& r) {
-      crumbs.insert(crumbs.begin(), json{{"id", r.text(0)}, {"level", r.i64(1)}, {"name", r.opt_text(2).value_or("")}});
-      next = r.opt_text(3).value_or("");
-    });
-    up = next;
-  }
-  if (!suburb.empty()) {
-    db->query("SELECT area_id, level, name FROM tree WHERE area_id = ?", {suburb}, [&](const sql::Row& r) {
-      crumbs.push_back(json{{"id", r.text(0)}, {"level", r.i64(1)}, {"name", r.opt_text(2).value_or("")}});
-    });
+  {
+    auto tree = set.db->lease();
+    std::string up = ward;
+    for (int guard = 0; guard < 10 && !up.empty(); ++guard) {
+      std::string next;
+      tree->query("SELECT area_id, level, name, parent_id FROM tree WHERE area_id = ?", {up}, [&](const sql::Row& r) {
+        crumbs.insert(crumbs.begin(), json{{"id", r.text(0)}, {"level", r.i64(1)}, {"name", r.opt_text(2).value_or("")}});
+        next = r.opt_text(3).value_or("");
+      });
+      up = next;
+    }
+    if (!suburb.empty()) {
+      tree->query("SELECT area_id, level, name FROM tree WHERE area_id = ?", {suburb}, [&](const sql::Row& r) {
+        crumbs.push_back(json{{"id", r.text(0)}, {"level", r.i64(1)}, {"name", r.opt_text(2).value_or("")}});
+      });
+    }
   }
   out["breadcrumb"] = crumbs;
   out["ward_id"] = ward.empty() ? json(nullptr) : json(ward);
   out["suburb_id"] = suburb.empty() ? json(nullptr) : json(suburb);
 
-  // roll entries (several for sectional titles); every one cites its roll
+  // value entries (several for sectional titles, or from more than one source); every one cites its source.
+  // market_value sums the entries that count: not zero placeholders, not superseded by a higher-priority roll.
   json vals = json::array();
   double total = 0;
   bool any = false;
   if (has_table(*db, "valuation")) {
-    db->query("SELECT muni_code, roll_period, category, usage, extent_m2, market_value, sale_price, sale_date, address, source_url "
-              "FROM valuation WHERE sg21 = ? ORDER BY roll_period DESC, market_value DESC",
+    const bool vrich = has_column(*db, "valuation", "value_flag");
+    db->query(std::string("SELECT muni_code, roll_period, category, usage, extent_m2, market_value, sale_price, sale_date, address, "
+                          "source_url") +
+                  (vrich ? ", roll, zoning, value_flag" : "") + " FROM valuation WHERE sg21 = ? ORDER BY roll_period DESC, market_value DESC",
               {sg21}, [&](const sql::Row& r) {
                 json v{{"muni_code", r.text(0)}};
                 const char* keys[] = {"roll_period", "category", "usage"};
                 for (int i = 0; i < 3; ++i)
                   if (!r.is_null(1 + i)) v[keys[i]] = r.text(1 + i);
+                std::string flag;
+                if (vrich) {
+                  if (!r.is_null(10)) v["roll"] = r.text(10);
+                  if (!r.is_null(11)) v["zoning"] = r.text(11);
+                  flag = r.opt_text(12).value_or("");
+                  if (!flag.empty()) v["flag"] = flag;
+                }
                 if (!r.is_null(4)) v["extent_m2"] = r.f64(4);
-                if (!r.is_null(5)) v["market_value"] = r.f64(5), total += r.f64(5), any = true;
+                if (!r.is_null(5)) {
+                  v["market_value"] = r.f64(5);
+                  if (flag != "zero" && flag != "superseded") total += r.f64(5), any = true;
+                }
                 if (!r.is_null(6)) v["sale_price"] = r.f64(6);
                 if (!r.is_null(7)) v["sale_date"] = r.text(7);
                 if (!r.is_null(8)) v["address"] = r.text(8);

@@ -47,6 +47,14 @@ UPDATE core.parcel p SET ward_id = w.area_id, muni_id = coalesce(p.muni_id, w.pa
 FROM core.admin_area w
 WHERE p.ward_id IS NULL AND w.level = 4 AND w.valid_to IS NULL AND ST_Intersects(w.geom, ST_PointOnSurface(p.geom));
 
+-- Plots whose centre misses every ward (slivers on boundary gaps, coast, old muni codes): nearest municipality
+-- within ~5 km, so every plot lands in a province pack. ward_id stays NULL: they are not inside any ward.
+UPDATE core.parcel p SET muni_id = (
+  SELECT m.area_id FROM core.admin_area m
+  WHERE m.level = 3 AND m.valid_to IS NULL AND ST_DWithin(m.geom_z10, ST_PointOnSurface(p.geom), 0.05)
+  ORDER BY m.geom_z10 <-> ST_PointOnSurface(p.geom) LIMIT 1)
+WHERE p.muni_id IS NULL;
+
 UPDATE core.parcel p SET suburb_id = s.area_id
 FROM core.admin_area s
 WHERE p.suburb_id IS NULL AND s.level = 6 AND ST_Intersects(s.geom, ST_PointOnSurface(p.geom));
@@ -78,7 +86,7 @@ ON CONFLICT (area_id, metric, as_of) DO UPDATE SET v = EXCLUDED.v;
 DELETE FROM agg.area_metric WHERE source_id = 'derived:parcels';
 WITH pv AS (
   SELECT p.sg21, p.ward_id, p.suburb_id, sum(v.market_value) AS value, max(v.sale_price) AS sale
-  FROM core.parcel p LEFT JOIN core.valuation v ON v.sg21 = p.sg21 AND coalesce(v.value_flag,'') <> 'zero'
+  FROM core.parcel_live p LEFT JOIN core.valuation_live v ON v.sg21 = p.sg21
   GROUP BY p.sg21, p.ward_id, p.suburb_id
 ), node AS (            -- every parcel counted once under each node above it
   SELECT anc.area_id, pv.value FROM pv JOIN core.admin_area w ON w.area_id = pv.ward_id
@@ -112,8 +120,8 @@ GROUP BY anc.area_id, ward.variable;
 ------------------------------------------------------------------ 4. H3 grid roll-ups (r9 -> r8 ... r5), independent of admin lines
 TRUNCATE agg.h3_metric;
 WITH pv AS (
-  SELECT p.h3_r9, sum(v.market_value) AS value FROM core.parcel p
-  LEFT JOIN core.valuation v ON v.sg21 = p.sg21 AND coalesce(v.value_flag,'') <> 'zero'
+  SELECT p.h3_r9, sum(v.market_value) AS value FROM core.parcel_live p
+  LEFT JOIN core.valuation_live v ON v.sg21 = p.sg21
   GROUP BY p.sg21, p.h3_r9
 ), r AS (SELECT generate_series(5, 9) AS res)
 INSERT INTO agg.h3_metric (h3, res, metric, v, n)
@@ -138,8 +146,9 @@ INSERT INTO core.search (ref, label, detail, rank, pt)
 SELECT 'node:power:' || node_id, name, concat_ws(' ', kind, array_to_string(kv, '/') || ' kV', operator), 4, geom
 FROM net.node WHERE network = 'power' AND name IS NOT NULL;
 INSERT INTO core.search (ref, label, detail, rank, pt)
-SELECT 'parcel:' || sg21, coalesce(town, farm_name, '') || ' ' || coalesce(parcel_no, '') || coalesce('/' || nullif(portion_no, ''), ''),
+SELECT 'parcel:' || sg21, coalesce(stand || ' ' || coalesce(town, ''),
+                                  coalesce(town, farm_name, '') || ' ' || coalesce(parcel_no, '') || coalesce('/' || nullif(portion_no, ''), '')),
        kind, 1, ST_PointOnSurface(geom)   -- the SG code is the ref; look it up with /v1/parcels/{sg21}
-FROM core.parcel;
+FROM core.parcel_live;
 
 ANALYZE;

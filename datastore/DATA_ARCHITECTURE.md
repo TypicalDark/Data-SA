@@ -231,16 +231,17 @@ map can be traced to the raw file it came from.
 | Step | Script | Status |
 |---|---|---|
 | Archive | `archive/gsa_archive.py` (wraps `archive/fetch_all.py`) | tested |
-| Schema | `schema/001_core.sql` | tested |
-| Load | `etl/gsa_load.py sources, admin, suburbs, population, parcels, valuation, grid, climate, dams` | tested on real data |
+| Schema | `schema/001_core.sql`, `schema/002_metro_values.sql` (stands, superseded plots, value priority) | tested |
+| Load | `etl/gsa_load.py sources, admin, suburbs, population, parcels, valuation, kzn_values, metro, grid, climate, dams` | national run |
 | Tree, keys, roll-ups, H3, search | `etl/build_tree.sql` | tested |
 | Tiles | `export/export_tiles.py` (tippecanoe per zoom band + tile-join; packs admin, grid, parcels-<prov>, h3, places) | national run |
-| Attribute pack | `export/export_pack.py` (SQLite, FTS5 search, packed time series) | national run |
+| Attribute packs | `export/export_pack.py` (SQLite, FTS5 search, packed time series; national `pack` + `pack-<prov>` plot packs) | national run |
+| Website plots | `export/export_web.py` (the site's natp bundles + manifest, same format as its `nat_tile.py`) | national run |
 | Release | `export/build_packs.py` (versions, sha256, `manifest.json`, `packs/installed.json`) | national run |
 | Run everything | `run_all.sh` | written |
 | Serve | `gsa-backend --data RELEASE` (C++, `backend/`) | national run |
 
-Still to write, in this order: KZN COGTA and metro valuation extras, 2026 wards and the 2021-2026
+Still to write, in this order: 2026 wards and the 2021-2026
 crosswalk, IEC results into `ts`, farms and crops, transport, solar and wind, hazards and environment,
 roads graph, raster packs (terrain, solar, rain) and GeoParquet export. The current loaders read the
 project's processed files; each will gain a `--from-raw SNAPSHOT` mode that reads the archive directly
@@ -344,7 +345,26 @@ RELEASE/packs/<id>/<id>-<version>.<ext>  pmtiles, sqlite or json
 
 **The website** (the published deck.gl artifact) cannot read PMTiles from its asset store: the artifact
 host refuses binary files, so its data ships as JSON/base64 bundles uploaded as assets (see the map
-pipeline notes). Today those bundles come from the website's own scripts, and `tools/webpack` converts
-them into `web-*` and `raster-*` packs for the app. The target is one source for both: an
-`export/export_web.py` that writes the website's bundle format from the same PostGIS tables, so a fix in
-the data store reaches the website and the app in the same release. That exporter is not written yet.
+pipeline notes). `export/export_web.py` writes the website's national plot bundles (`natp`) from the
+same PostGIS tables as the app's packs, in the format of the site's `scripts/nat_tile.py`
+(`bundles/<z>_<x>_<y>.js` + `manifest_local.json`, then the site's `natp_manifest.py`). A roll fix or a
+newer metro copy loaded into the store now reaches the app and the website from one run. Uploading the
+bundles and swapping the site's manifest stays with the map thread, because replacing assets in the
+store needs your OK. The other website layers still come from the site's own scripts; they move to the
+store loader by loader (the list in section 6).
+
+### 11.1 Value priority and newer stands
+
+- **Several sources per plot.** Municipal rolls (`parcel_values`), the KZN COGTA layers and Joburg's
+  GV2023 stand values are all kept in `core.valuation`, each row citing its source. Where a municipal
+  roll values a plot, the KZN COGTA row for it is flagged `superseded`: the plot card still lists it,
+  but sums, medians and the map count the roll value only (`core.valuation_live`). Same rule as the
+  website and the app's pack builder.
+- **Newer metro stands.** Joburg and Ekurhuleni stands (`parcels/gp_extra`) replace the 2022 SG parcel
+  with the same SG code. An SG parcel whose centre falls inside a stand with another code (stands get
+  split and merged) gets `superseded_by`; it stays in the store and on the plot card, but exports draw
+  the stand only (`core.parcel_live`).
+- **Province packs.** `export_pack.py` writes the national `pack.sqlite` (tree, metrics, grid, series,
+  sources, search without plots) and one `pack-<prov>.sqlite` per province (plots, their values, plot
+  search). `gsa-backend` looks a plot up in the province packs, takes the breadcrumb from the national
+  pack, and merges search hits from all of them, so a user can install only the provinces they need.

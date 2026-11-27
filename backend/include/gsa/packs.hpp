@@ -33,7 +33,10 @@ struct PackInfo {
 // their lifetime, so a pack swap never pulls a file out from under a request.
 struct PackSet {
   std::map<std::string, std::shared_ptr<const pmtiles::Archive>> tiles;
-  std::shared_ptr<sql::Pool> db;  // the attribute pack, may be null
+  std::shared_ptr<sql::Pool> db;  // the national attribute pack ("pack"), may be null
+  // Province attribute packs (pack-wc, pack-gt ...): plots, their values and plot search, one file per
+  // province so a user installs only the provinces they need. Keyed by region code ("WC").
+  std::map<std::string, std::shared_ptr<sql::Pool>> regional;
   // Small JSON data packs (the Find data, ...), checked to parse when loaded, served as they are.
   std::map<std::string, std::shared_ptr<const std::string>> data;
   std::vector<PackInfo> info;

@@ -12,6 +12,7 @@ L="python3 $HERE/etl/gsa_load.py"
 mkdir -p "$OUT"
 
 psql "$GSA_DSN" -q -v ON_ERROR_STOP=1 -f "$HERE/schema/001_core.sql"
+psql "$GSA_DSN" -q -v ON_ERROR_STOP=1 -f "$HERE/schema/002_metro_values.sql"
 if [ -n "$RAW" ]; then
   $L sources "$RAW/_catalog/sources.json" --snapshots "$RAW/_catalog/snapshots.jsonl"
 fi
@@ -20,17 +21,20 @@ $L suburbs    "$DATA/population/suburbs_population.geojson.gz"
 $L population "$DATA/population/wards_population.csv"
 $L parcels    "$DATA"/parcels/muni/*.geojsonl.gz "$DATA"/parcels/kzn/*.geojsonl.gz
 $L valuation  "$DATA/parcels/parcel_values.csv.gz"
+$L kzn_values "$DATA/valuation/kzn_cogta/kzn_cogta_values.csv.gz"
+$L metro      "$DATA/parcels/gp_extra/JHB_metro.geojsonl.gz" "$DATA/parcels/gp_extra/EKU_metro.geojsonl.gz"
 $L grid       "$DATA/network/v2/grid_nodes_v2.geojson" "$DATA/network/v2/grid_edges_v2.geojson"
 $L climate    "$DATA/climate/climate_wards_monthly.csv.gz"
 $L dams       "$DATA/dams/dam_levels_current.csv"
 psql "$GSA_DSN" -q -v ON_ERROR_STOP=1 -f "$HERE/etl/build_tree.sql"
 python3 "$HERE/export/export_tiles.py" "$OUT/tiles"
-python3 "$HERE/export/export_pack.py"  "$OUT/pack.sqlite"
+python3 "$HERE/export/export_pack.py"  "$OUT/pack.sqlite"      # also writes pack-<prov>.sqlite
+python3 "$HERE/export/export_web.py"   "$OUT/web"              # the website's plot bundles (natp)
 # A release folder the back-end serves as is (gsa-backend --data "$OUT/release").
 # EXTRA_PACKS: website packs and JSON data packs to include, e.g. "web-*.pmtiles raster-*.pmtiles find.json".
 PREV=()
 [ -f "$OUT/release/manifest.json" ] && PREV=(--previous "$OUT/release/manifest.json")
-python3 "$HERE/export/build_packs.py" "$OUT/release.new" --tiles "$OUT/tiles" --pack "$OUT/pack.sqlite" \
+python3 "$HERE/export/build_packs.py" "$OUT/release.new" --tiles "$OUT/tiles" --pack "$OUT"/pack.sqlite "$OUT"/pack-*.sqlite \
   ${EXTRA_PACKS:+--add $EXTRA_PACKS} "${PREV[@]}"
 rm -rf "$OUT/release.old"; [ -d "$OUT/release" ] && mv "$OUT/release" "$OUT/release.old"
 mv "$OUT/release.new" "$OUT/release"

@@ -155,24 +155,45 @@ void handle_search(const Ctx& ctx, const httplib::Request& req, httplib::Respons
   json out = json::array();
   if (fq.empty()) return send_json(res, out);
   // Ranking: exact label first, then label prefix, then bm25 text relevance, nudged by the
-  // pack's weight (provinces and municipalities above wards, wards above plots).
-  const std::string sql =
-      "SELECT ref, label, detail, lon, lat, "
-      "  CASE WHEN ref LIKE 'area:%' THEN (SELECT level FROM tree WHERE area_id = substr(search.ref, 6)) END AS level "
-      "FROM search WHERE search MATCH ?1 "
-      "ORDER BY (CASE WHEN lower(label) = ?2 THEN -100 WHEN lower(label) LIKE ?2 || '%' THEN -20 ELSE 0 END) "
-      "         + bm25(search) - coalesce(weight, 0) * 1.5 "
-      "LIMIT ?3";
-  auto db = set->db->lease();
-  db->query(sql, {fq, lower(q), int64_t(limit)}, [&](const sql::Row& r) {
-    const std::string ref = r.text(0), detail = r.text(2);
-    std::optional<int> level;
-    if (!r.is_null(5)) level = int(r.i64(5));
-    json h{{"ref", ref}, {"kind", kind_for(ref, level, detail)}, {"label", r.text(1)}, {"detail", detail}};
-    if (!r.is_null(3)) h["lon"] = r.f64(3);
-    if (!r.is_null(4)) h["lat"] = r.f64(4);
-    out.push_back(h);
-  });
+  // pack's weight (provinces and municipalities above wards, wards above plots). The national pack
+  // and every province pack (plots) are searched, and the best hits of all of them are merged.
+  const std::string order =
+      "(CASE WHEN lower(label) = ?2 THEN -100 WHEN lower(label) LIKE ?2 || '%' THEN -20 ELSE 0 END) "
+      "+ bm25(search) - coalesce(weight, 0) * 1.5";
+  struct Hit {
+    double score;
+    json j;
+  };
+  std::vector<Hit> hits;
+  auto run = [&](sql::Pool& pool, bool national) {
+    auto db = pool.lease();
+    if (!national) {
+      bool fts = false;
+      db->query("SELECT 1 FROM sqlite_master WHERE name = 'search'", {}, [&](const sql::Row&) { fts = true; });
+      if (!fts) return;
+    }
+    const std::string level = national
+        ? "CASE WHEN ref LIKE 'area:%' THEN (SELECT level FROM tree WHERE area_id = substr(search.ref, 6)) END"
+        : "NULL";
+    const std::string sql = "SELECT ref, label, detail, lon, lat, " + level + " AS level, " + order +
+                            " AS score FROM search WHERE search MATCH ?1 ORDER BY score LIMIT ?3";
+    db->query(sql, {fq, lower(q), int64_t(limit)}, [&](const sql::Row& r) {
+      const std::string ref = r.text(0), detail = r.text(2);
+      std::optional<int> lv;
+      if (!r.is_null(5)) lv = int(r.i64(5));
+      json h{{"ref", ref}, {"kind", kind_for(ref, lv, detail)}, {"label", r.text(1)}, {"detail", detail}};
+      if (!r.is_null(3)) h["lon"] = r.f64(3);
+      if (!r.is_null(4)) h["lat"] = r.f64(4);
+      hits.push_back({r.f64(6), std::move(h)});
+    });
+  };
+  run(*set->db, true);
+  for (const auto& [region, pool] : set->regional) run(*pool, false);
+  std::stable_sort(hits.begin(), hits.end(), [](const Hit& a, const Hit& b) { return a.score < b.score; });
+  for (auto& h : hits) {
+    if (int(out.size()) >= limit) break;
+    out.push_back(std::move(h.j));
+  }
   send_json(res, out);
 }
 

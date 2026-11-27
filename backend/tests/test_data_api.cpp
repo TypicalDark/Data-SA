@@ -42,6 +42,7 @@ void make_pack(const fs::path& file) {
     CREATE TABLE metric (area_id TEXT, metric TEXT, as_of TEXT, v REAL, n INT, source_id TEXT, PRIMARY KEY (area_id, metric, as_of));
     CREATE TABLE source (source_id TEXT PRIMARY KEY, title TEXT, publisher TEXT, url TEXT, licence TEXT, resale_ok INT, cadence TEXT, privacy TEXT);
     CREATE VIRTUAL TABLE search USING fts5(ref UNINDEXED, label, detail, weight UNINDEXED, lon UNINDEXED, lat UNINDEXED);
+    INSERT INTO search VALUES ('area:WC053','Beaufort West','Municipality, Western Cape',7,22.58,-32.35);
     CREATE TABLE parcel (sg21 TEXT PRIMARY KEY, ward_id TEXT, suburb_id TEXT, kind TEXT, town TEXT, parcel_no TEXT, portion_no TEXT,
                          area_m2 REAL, h3_r9 TEXT, quadkey_z16 TEXT, lon REAL, lat REAL);
     INSERT INTO parcel VALUES ('C05200010000002300000','W10503001','SX1','erf','BEAUFORT WEST','23','0',1190,'89...','3001',22.58,-32.35);
@@ -80,6 +81,33 @@ void make_pack(const fs::path& file) {
   sqlite3_close(db);
 }
 
+// A province pack (pack-wc.sqlite) as export_pack.py writes it: plots, their values and plot search only.
+// Newer columns: parcel.stand / superseded_by, valuation.roll / zoning / value_flag.
+void make_province_pack(const fs::path& file) {
+  sqlite3* db = nullptr;
+  REQUIRE(sqlite3_open(file.string().c_str(), &db) == SQLITE_OK);
+  const char* sql = R"SQL(
+    CREATE TABLE pack_info (k TEXT PRIMARY KEY, v TEXT);
+    INSERT INTO pack_info VALUES ('format','gsa-pack/1'), ('region','WC');
+    CREATE TABLE parcel (sg21 TEXT PRIMARY KEY, ward_id TEXT, suburb_id TEXT, kind TEXT, town TEXT, parcel_no TEXT, portion_no TEXT,
+                         area_m2 REAL, h3_r9 TEXT, quadkey_z16 TEXT, lon REAL, lat REAL, stand TEXT, superseded_by TEXT);
+    INSERT INTO parcel VALUES ('C05200010000002400000','W10503001',NULL,'erf','BEAUFORT WEST','24','0',900,NULL,NULL,22.59,-32.35,
+                               'RE/24',NULL);
+    CREATE TABLE valuation (sg21 TEXT, muni_code TEXT, roll_period TEXT, category TEXT, usage TEXT, extent_m2 REAL,
+                            market_value INT, sale_price INT, sale_date TEXT, address TEXT, source_url TEXT,
+                            roll TEXT, zoning TEXT, value_flag TEXT);
+    INSERT INTO valuation VALUES ('C05200010000002400000','WC053','2023-2027','RES',NULL,900,500000,NULL,NULL,'14 DONKIN ST',
+                                  'https://example.org/roll.pdf','general','Residential 1',NULL),
+                                 ('C05200010000002400000','WC053',NULL,'RES',NULL,900,480000,NULL,NULL,NULL,
+                                  'https://example.org/layer','other layer',NULL,'superseded');
+    CREATE VIRTUAL TABLE search USING fts5(ref UNINDEXED, label, detail, weight UNINDEXED, lon UNINDEXED, lat UNINDEXED);
+    INSERT INTO search VALUES ('parcel:C05200010000002400000','RE/24 BEAUFORT WEST','erf',1,22.59,-32.35);
+  )SQL";
+  char* err = nullptr;
+  REQUIRE_MESSAGE(sqlite3_exec(db, sql, nullptr, nullptr, &err) == SQLITE_OK, (err ? err : ""));
+  sqlite3_close(db);
+}
+
 struct DataServer {
   fs::path dir;
   httplib::Server srv;
@@ -90,6 +118,7 @@ struct DataServer {
     fs::remove_all(dir);
     fs::create_directories(dir / "packs");
     make_pack(dir / "packs" / "pack.sqlite");
+    make_province_pack(dir / "packs" / "pack-wc.sqlite");
     auto store = std::make_shared<gsa::PackStore>(dir);
     gsa::mount_api(srv, gsa::ApiConfig{store, "", ""});
     port = srv.bind_to_any_port("127.0.0.1");
@@ -196,4 +225,25 @@ TEST_CASE("trace: connected, path, feed, fail") {
   get("/v1/trace?mode=nope&from=1", 400);
   get("/v1/trace?from=abc", 400);
   get("/v1/trace?from=99", 404);
+}
+
+TEST_CASE("plots in a province pack") {
+  const auto p = get("/v1/parcels/C05200010000002400000");
+  CHECK(p["stand"] == "RE/24");
+  CHECK(!p.contains("superseded_by"));
+  REQUIRE(p["valuations"].size() == 2);
+  // the superseded entry is listed with its flag but not counted
+  CHECK(p["market_value"] == 500000);
+  CHECK(p["valuations"][0]["zoning"] == "Residential 1");
+  CHECK(p["valuations"][1]["flag"] == "superseded");
+  REQUIRE(p["breadcrumb"].size() == 4);  // tree from the national pack
+  CHECK(p["breadcrumb"][3]["id"] == "W10503001");
+}
+
+TEST_CASE("search merges the national and province packs") {
+  const auto h = get("/v1/search?q=beaufort");
+  REQUIRE(h.size() == 2);
+  CHECK(h[0]["ref"] == "area:WC053");  // exact label first, and the municipality outranks the plot
+  CHECK(h[1]["ref"] == "parcel:C05200010000002400000");
+  CHECK(get("/v1/search?q=beaufort&limit=1").size() == 1);
 }

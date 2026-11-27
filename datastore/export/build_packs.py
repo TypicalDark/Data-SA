@@ -1,10 +1,10 @@
 """Grid of SA: build a release of data packs and the files the back-end and updater read.
 
-    python build_packs.py RELEASE_DIR [--tiles DIR] [--pack FILE.sqlite] [--add FILE ...] [--base-url URL]
+    python build_packs.py RELEASE_DIR [--tiles DIR] [--pack pack.sqlite pack-wc.sqlite ...] [--add FILE ...] [--base-url URL]
                           [--channel stable|beta] [--previous OLD_RELEASE_DIR/manifest.json]
 
-Inputs are finished pack files: the output folder of export_tiles.py (--tiles), the SQLite pack from
-export_pack.py (--pack), and any other packs (--add), such as the website packs from tools/webpack
+Inputs are finished pack files: the output folder of export_tiles.py (--tiles), the SQLite packs from
+export_pack.py (--pack: pack.sqlite and the pack-<prov>.sqlite province files), and any other packs (--add), such as the website packs from tools/webpack
 (web-*.pmtiles, raster-*.pmtiles) or JSON data packs (find.json).
 
 Output (RELEASE_DIR):
@@ -72,7 +72,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("out")
     ap.add_argument("--tiles", help="folder of .pmtiles from export_tiles.py")
-    ap.add_argument("--pack", help="SQLite pack from export_pack.py")
+    ap.add_argument("--pack", nargs="*", default=[], help="SQLite packs from export_pack.py (pack.sqlite, pack-<prov>.sqlite)")
     ap.add_argument("--add", nargs="*", default=[], help="other pack files (.pmtiles, .json, .sqlite)")
     ap.add_argument("--base-url", default="", help="where the release will be served, e.g. https://packs.example/stable/")
     ap.add_argument("--channel", default="stable", choices=["stable", "beta"])
@@ -82,7 +82,7 @@ def main():
 
     files = []
     if a.tiles: files += sorted(os.path.join(a.tiles, f) for f in os.listdir(a.tiles) if f.endswith(".pmtiles"))
-    if a.pack: files.append(a.pack)
+    files += a.pack
     files += a.add
     if not files: sys.exit("nothing to pack: give --tiles, --pack or --add")
 

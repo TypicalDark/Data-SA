@@ -105,6 +105,7 @@ paths:
     get:
       operationId: search
       summary: One search box over places, areas, facilities and plots
+      description: Searches the national pack and every installed province pack (plots), and merges the best hits.
       parameters:
         - { name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 200 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 12 } }
@@ -153,6 +154,7 @@ paths:
     get:
       operationId: getParcel
       summary: "Plot card: the plot, where it sits in the place tree, and its valuation roll entries"
+      description: "Looked up in the province packs (pack-wc ...) and then the national pack; 404 when no installed province has the plot."
       parameters:
         - name: sg21
           in: path
@@ -410,6 +412,8 @@ components:
         town: { type: string }
         parcel_no: { type: string }
         portion_no: { type: string }
+        stand: { type: string, description: "The city's own stand label where a metro stand replaced the SG parcel (Joburg RE/54/239-IQ)" }
+        superseded_by: { type: string, description: "Set on an older SG parcel whose centre lies inside a newer metro stand; the map draws that stand instead" }
         area_m2: { type: number }
         center: { type: array, items: { type: number }, minItems: 2, maxItems: 2 }
         h3_r9: { type: string }
@@ -417,14 +421,17 @@ components:
         ward_id: { type: [string, "null"] }
         suburb_id: { type: [string, "null"] }
         breadcrumb: { type: array, items: { $ref: "#/components/schemas/AreaRef" } }
-        market_value: { type: [number, "null"], description: Sum of the roll entries' market values }
+        market_value: { type: [number, "null"], description: "Sum of the entries' market values, leaving out entries flagged zero or superseded" }
         valuations:
           type: array
           items:
             type: object
             properties:
               muni_code: { type: string }
+              roll: { type: string, description: "general, supplementary, KZN COGTA valuation layer, JHB GV2023 ..." }
               roll_period: { type: string }
+              flag: { type: string, description: "superseded (a higher-priority roll values this plot) or zero (placeholder); listed but not summed" }
+              zoning: { type: string }
               category: { type: string }
               usage: { type: string }
               extent_m2: { type: number }

@@ -1,6 +1,7 @@
 #include "gsa/packs.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <iterator>
 
@@ -76,6 +77,11 @@ std::shared_ptr<const PackSet> PackStore::load() const {
       const auto stem = e.path().stem().string();
       if (ext == ".pmtiles" && valid_pack_id(stem)) found.push_back({stem, "tiles", "dev", e.path(), 0});
       if (ext == ".sqlite" && stem == "pack") found.push_back({"pack", "sqlite", "dev", e.path(), 0});
+      if (ext == ".sqlite" && stem.rfind("pack-", 0) == 0 && valid_pack_id(stem)) {
+        std::string region = stem.substr(5);
+        for (auto& c : region) c = char(std::toupper(static_cast<unsigned char>(c)));
+        found.push_back({stem, "sqlite", "dev", e.path(), 0, "", region});
+      }
       if (ext == ".json" && stem != "installed" && valid_pack_id(stem)) found.push_back({stem, "json", "dev", e.path(), 0});
     }
   }
@@ -91,7 +97,12 @@ std::shared_ptr<const PackSet> PackStore::load() const {
         throw std::runtime_error("pack " + p.id + " has schema " + std::to_string(schema) +
                                  ", which this back-end cannot read; update the app first");
       }
-      set->db = pool;
+      if (p.region.empty()) {
+        if (set->db) throw std::runtime_error("two national attribute packs installed (" + p.id + ")");
+        set->db = pool;
+      } else {
+        set->regional[p.region] = pool;
+      }
     } else if (p.kind == "json") {
       std::ifstream in(p.file, std::ios::binary);
       auto body = std::make_shared<std::string>(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());

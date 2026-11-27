@@ -11,18 +11,19 @@ exports: a release folder made by `datastore/export/build_packs.py`.
 | `admin` | PMTiles, MVT | `export_tiles.py --pack admin` | province, district, municipality, ward, suburb, label |
 | `grid` | PMTiles, MVT | `export_tiles.py --pack grid` | line, facility |
 | `parcels` | PMTiles, MVT | `tools/webpack/build_parcels_pack.py` (until the store's `export_tiles.py --pack parcels`) | parcel: sg21, type, label, town, area, muni, and where a roll matched value, cat, use, sale, sale_date, roll (plus address and zoning from Joburg's roll); zoom 12-14, about 9M plots |
-| `parcels-<prov>` (`parcels-wc`, `parcels-gt`, ...) | PMTiles, MVT | `datastore/export/export_tiles.py --pack parcels` (replaces `parcels` once the app reads per-province packs) | parcel, same layer, zooms (12-14) and properties as `parcels` plus `ward`; one pack per province (`region` in installed.json), 0.96 GB together |
+| `parcels-<prov>` (`parcels-wc`, `parcels-gt`, ...) | PMTiles, MVT | `datastore/export/export_tiles.py --pack parcels` (replaces `parcels` once the app reads per-province packs) | parcel, same layer, zooms (12-14) and properties as `parcels` plus `ward` and `units`; includes the KZN COGTA values and the Joburg/Ekurhuleni stands (Joburg GV2023 values, address, zoning); one pack per province (`region` in installed.json) |
 | `h3`, `places` | PMTiles, MVT | `export_tiles.py` | hex, place |
 | `web-grid`, `web-water`, `web-risk`, `web-nature`, `web-vote`, `web-prop`, `web-land`, `web-places`, `web-move` | PMTiles, MVT | `tools/webpack/build_web_packs.py` | the website map's layers, one vector layer per website layer id (`x:pa` is `x_pa`) |
 | `raster-relief`, `raster-fire`, ... (ten) | PMTiles, PNG | `tools/webpack/build_raster_packs.py` | the website's images as 256 px tiles |
 | `base` | PMTiles, MVT | `tools/webpack/build_base_pack.py` | road (r class 0-7, name, ref, bridge, tunnel), rail, land (c class), poi (k kind), place (r rank); the website's base map, zoom 5-9 from its overview and 10-14 from its regional tiles (about 180 MB) |
 | `buildings` | PMTiles, GSB1 tiles (gzip) | `tools/webpack/build_buildings_pack.py` | 44.2M footprints at zoom 12 in the website's GSB1 encoding (OSM, Google Open Buildings, Microsoft; about 230 MB); the app decodes them in `gsb.cpp` |
 | `find` | JSON | the website's `data/x/find.json`, copied | municipalities (outline, people, area, median value, ward winners), NTCSA free capacity, dams, airports, ports, power stations, towns; served at `/v1/data/find` |
-| `pack` | SQLite, `gsa-pack/1` | `export_pack.py` | tree, metric, parcel, valuation, node, edge, series, series_data, source, snapshot, search (FTS5), pack_info |
+| `pack` | SQLite, `gsa-pack/1` | `export_pack.py` | tree, metric, node, edge, series, series_data, source, snapshot, search (FTS5, everything but plots), pack_info; plus the few parcel/valuation rows no province takes. `--single` keeps all plots here instead (dev packs) |
+| `pack-<prov>` (`pack-wc`, `pack-gt`, ...) | SQLite, `gsa-pack/1` | `export_pack.py` | parcel (with `stand`, `superseded_by`), valuation (with `roll`, `zoning`, `value_flag`), search (plots), pack_info (`region`); one per province (`region` in installed.json). `/v1/parcels` and `/v1/search` read them |
 
 ## Release folder, manifest and installed.json
 
-`build_packs.py RELEASE --tiles TILES_DIR --pack pack.sqlite --add web-*.pmtiles raster-*.pmtiles find.json`
+`build_packs.py RELEASE --tiles TILES_DIR --pack pack.sqlite pack-*.sqlite --add web-*.pmtiles raster-*.pmtiles find.json`
 writes:
 
 ```

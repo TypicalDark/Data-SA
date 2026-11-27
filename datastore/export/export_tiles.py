@@ -46,17 +46,20 @@ LAYERS = [
  # Same layer name, zooms (12-14, overzoomed after) and property names as tools/webpack/build_parcels_pack.py,
  # so the app reads either pack.
  ("parcel", "parcels", """SELECT p.sg21, jsonb_strip_nulls(jsonb_build_object('sg21',p.sg21,'type',p.kind,
-        'label', CASE WHEN p.kind IN ('farm','farm_portion')
+        'label', CASE WHEN p.stand IS NOT NULL THEN p.stand
+                 WHEN p.kind IN ('farm','farm_portion')
                       THEN CASE WHEN coalesce(ltrim(p.portion_no,'0'),'') <> '' THEN 'Ptn '||ltrim(p.portion_no,'0')||' of ' ELSE '' END
                            || coalesce(p.farm_name, ltrim(p.parcel_no,'0'))
                       ELSE 'Erf '||coalesce(nullif(ltrim(p.parcel_no,'0'),''), p.parcel_no)
                            || CASE WHEN coalesce(ltrim(p.portion_no,'0'),'') <> '' THEN ' ptn '||ltrim(p.portion_no,'0') ELSE '' END END,
         'town',coalesce(p.town,p.farm_name),'area',round(p.area_m2::numeric,1),'muni',p.muni_id,'scheme',p.scheme,'ward',p.ward_id,
-        'value',v.value,'cat',v.cat,'use',v.use,'sale',v.sale,'sale_date',v.sale_date,'roll',v.roll)), p.geom, 12, 14
-   FROM core.parcel p LEFT JOIN LATERAL (
+        'value',v.value,'cat',v.cat,'use',v.use,'sale',v.sale,'sale_date',v.sale_date,'roll',v.roll,'units',nullif(v.units,1),
+        'address',v.address,'zoning',v.zoning)), p.geom, 12, 14
+   FROM core.parcel_live p LEFT JOIN LATERAL (
         SELECT sum(market_value) value, max(category) cat, max(usage) use, max(sale_price) sale, max(sale_date)::text sale_date,
-               max(muni_code || ' ' || roll_period) roll
-        FROM core.valuation WHERE sg21=p.sg21 AND coalesce(value_flag,'')<>'zero') v ON true {split}""", ["--no-feature-limit", "--no-tile-size-limit"]),
+               max(concat_ws(' ', CASE WHEN roll IN ('general','supplementary') THEN muni_code || ' ' || roll ELSE roll END, roll_period)) roll, count(*) units,
+               min(address) address, min(zoning) zoning
+        FROM core.valuation_live WHERE sg21=p.sg21) v ON true {split}""", ["--no-feature-limit", "--no-tile-size-limit"]),
  ("hex", "h3", """SELECT h.h3::text || ':' || h.metric, jsonb_build_object('h3',h.h3::text,'res',h.res,'metric',h.metric,'v',round(h.v::numeric),'n',h.n),
         h3_cell_to_boundary_geometry(h.h3),
         CASE h.res WHEN 5 THEN 4 WHEN 6 THEN 6 WHEN 7 THEN 8 WHEN 8 THEN 10 ELSE 11 END,
