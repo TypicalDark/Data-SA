@@ -4,7 +4,8 @@
 
 PARCELS_DIR is grid-of-sa/parcels: muni/{CODE}.geojsonl.gz (national SG copy and WC SG), kzn/ (newer KZN
 copy, replaces muni/ files with the same name), gp_extra/{JHB,EKU}_metro.geojsonl.gz (newer metro
-stands, replace SG parcels with the same sg21) and parcel_values.csv.gz (roll values joined by sg21).
+stands, replace SG parcels with the same sg21) and parcel_values.csv.gz (roll values joined by sg21),
+plus ../valuation/kzn_cogta/kzn_cogta_values.csv.gz for KZN plots the rolls do not cover.
 
 Writes parcels.pmtiles, vector layer `parcel`, zoom 12-14 (the app overzooms to 22; the website shows
 plots from 12.5). Properties: sg21, type, label (erf / portion / farm), town, area (m2), muni, and
@@ -36,6 +37,29 @@ def load_values(path):
                  "units": int(num(r["units"]) or 1)}
             vals[r["sg21"]] = {k: x for k, x in v.items() if x is not None and not (k == "units" and x == 1)}
     return vals
+
+
+def add_kzn_values(path, vals):
+    """KZN COGTA valuation layers (eThekwini and 22 more), for plots the combined rolls do not cover.
+    Several rows on one plot (sectional-title units) are summed. The `unit` column is never read."""
+    if not os.path.exists(path):
+        return 0
+    acc = {}
+    with gzip.open(path, "rt", encoding="utf-8", newline="") as f:
+        for r in csv.DictReader(f):
+            sg = (r.get("sg_code") or "")[:21]
+            v = num(r.get("market_value"))
+            if len(sg) < 21 or sg in vals or v is None:
+                continue
+            a = acc.setdefault(sg, {"value": 0.0, "units": 0, "cat": r.get("category") or None,
+                                    "use": r.get("usage") or None, "address": r.get("address") or None,
+                                    "sale": num(r.get("sale_price")), "sale_date": r.get("sale_date") or None,
+                                    "roll": "KZN COGTA valuation layer"})
+            a["value"] += v
+            a["units"] += 1
+    for sg, a in acc.items():
+        vals[sg] = {k: x for k, x in a.items() if x is not None and not (k == "units" and x == 1)}
+    return len(acc)
 
 
 def label(p):
@@ -85,7 +109,8 @@ def main():
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     vals = load_values(os.path.join(a.parcels, "parcel_values.csv.gz"))
-    print(f"values: {len(vals)} parcels", file=sys.stderr)
+    nk = add_kzn_values(os.path.join(a.parcels, "..", "valuation", "kzn_cogta", "kzn_cogta_values.csv.gz"), vals)
+    print(f"values: {len(vals)} parcels ({nk} from KZN COGTA)", file=sys.stderr)
     files = {os.path.basename(p): p for p in glob.glob(os.path.join(a.parcels, "muni", "*.geojsonl.gz"))}
     files.update({os.path.basename(p): p for p in glob.glob(os.path.join(a.parcels, "kzn", "*.geojsonl.gz"))})
     metro = {"JHB": "JHB_metro", "EKU": "EKU_metro"}
