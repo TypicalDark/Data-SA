@@ -106,6 +106,17 @@ TEST_CASE("version and packs") {
   CHECK(admin);
 }
 
+TEST_CASE("data packs: the Find data") {
+  const auto f = get_json("/v1/data/find");
+  CHECK(f["munis"].size() > 200);
+  CHECK(f["cap"].size() > 100);
+  get_json("/v1/data/nothing", 404);
+  bool listed = false;
+  for (const auto& p : get_json("/v1/packs"))
+    if (p["id"] == "find") listed = p["kind"] == "json";
+  CHECK(listed);
+}
+
 TEST_CASE("tiles: bytes, encoding, empty and errors") {
   auto c = client();
   auto r = c.Get("/v1/tiles/admin/5/17/18");  // Western Cape

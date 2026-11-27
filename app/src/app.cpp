@@ -92,9 +92,14 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
               [&](const auto& a, const auto& b) { return rank(a.pack) != rank(b.pack) ? rank(a.pack) < rank(b.pack) : a.pack < b.pack; });
   }
   avail_ = layers::available(pack_ids, pack_layers_);
+  fdata_req_ = fetch("/v1/data/find");
 
   const auto& sd = settings_->data();
   side_open_ = sd.value("side_open", true);
+  if (opt_.screenshot.empty()) {
+    rules_ = find::rules_from(sd.value("find_rules", json::array()));
+    rank_key_ = sd.value("rank", rank_key_);
+  }
   if (opt_.screenshot.empty() && sd.contains("topic")) set_topic(sd.value("topic", "start"));
   else set_topic(opt_.topic.empty() ? "start" : topic_id(opt_.topic));
   if (!opt_.topic.empty()) set_topic(topic_id(opt_.topic));
@@ -270,7 +275,7 @@ void App::frame() {
     last_need_ = need;
   }
   poll_async();
-  map_->set_style(layers::map_style(lstate_));
+  map_->set_style(map_style_now());
 
   ImGui_ImplVulkan_NewFrame();
   ImGui_ImplGlfw_NewFrame();
@@ -350,6 +355,18 @@ App::JsonFuture App::fetch(const std::string& path) {
 }
 
 void App::poll_async() {
+  if (fdata_req_.valid() && fdata_req_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+    if (auto j = fdata_req_.get()) {
+      try {
+        fdata_ = find::parse(*j);
+        set_rules(rules_);
+        if (!find_toast_.empty()) toast(find_toast_ + ": " + std::to_string(fpass_.size()) + " municipalities match");
+        find_toast_.clear();
+      } catch (const std::exception& e) {
+        toast(std::string("Find data unreadable: ") + e.what());
+      }
+    }
+  }
   for (auto it = area_req_.begin(); it != area_req_.end();) {
     if (it->second.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
       auto j = it->second.get();
@@ -421,8 +438,24 @@ void App::set_topic(const std::string& id) {
   apply_layers();
 }
 
+layers::MapStyle App::map_style_now() const {
+  auto ms = layers::map_style(lstate_);
+  ms.find_on = fdata_ && !rules_.empty();
+  if (ms.find_on) ms.find_pass = fpass_;
+  return ms;
+}
+
+void App::set_rules(std::vector<find::Rule> r) {
+  rules_ = std::move(r);
+  fpass_ = fdata_ ? find::run(*fdata_, rules_) : std::set<std::string>{};
+  if (opt_.screenshot.empty()) {
+    settings_->data()["find_rules"] = find::to_json(rules_);
+    settings_->save();
+  }
+}
+
 void App::apply_layers() {
-  map_->set_style(layers::map_style(lstate_));
+  map_->set_style(map_style_now());
   // only fetch the website packs whose layers are on
   const auto want = layers::packs_needed(lstate_, pack_layers_);
   packs_.clear();
@@ -613,6 +646,10 @@ void App::save_view(const std::string& name) {
             {"hidden", std::vector<std::string>(lstate_.hidden.begin(), lstate_.hidden.end())},
             {"focus", lstate_.focus}};
   if (cards_.back().kind == Card::Area) e["area"] = cards_.back().id;
+  // views keep the Find conditions and the Find / Rank tab, as on the website
+  if (!rules_.empty()) e["find"] = find::to_json(rules_);
+  e["find_tab"] = find_rank_ ? "rank" : "find";
+  e["rank"] = rank_key_;
   for (auto& x : v)
     if (x.value("name", "") == n) {
       x = e;
@@ -637,6 +674,9 @@ bool App::load_view(const std::string& name) {
     const auto h = e.value("hidden", std::vector<std::string>{});
     lstate_.hidden = std::set<std::string>(h.begin(), h.end());
     lstate_.focus = e.value("focus", "");
+    set_rules(find::rules_from(e.value("find", json::array())));
+    find_rank_ = e.value("find_tab", "find") == "rank";
+    rank_key_ = e.value("rank", rank_key_);
     apply_layers();
     fly_ = Fly{now_s(), 0.7, cam_, geo::mx(e.value("lon", 25.2)), geo::my(e.value("lat", -28.8)), e.value("zoom", 5.4)};
     if (e.contains("area")) open_area(e["area"], false);
@@ -768,7 +808,24 @@ bool App::run_command(const std::string& line) {
     find_rank_ = false;
     panel_ = Panel::Find;
     side_open_ = true;
+    if (const auto* pre = find::preset(a)) {
+      set_rules(pre->rules);
+      if (fdata_) toast(std::string(pre->name) + ": " + std::to_string(fpass_.size()) + " municipalities match");
+      else find_toast_ = pre->name;  // once the Find data arrives
+    }
   } else if (c == "RANK") {
+    // "RANK dams", "RANK capacity": pick the list by its key or the start of its name
+    std::string q = a;
+    std::transform(q.begin(), q.end(), q.begin(), ::tolower);
+    if (!q.empty())
+      for (const auto& d : find::rank_defs()) {
+        std::string l = d.label;
+        std::transform(l.begin(), l.end(), l.begin(), ::tolower);
+        if (q == d.k || l.rfind(q, 0) == 0 || (q == "capacity" && std::string(d.k) == "cap")) {
+          rank_key_ = d.k;
+          break;
+        }
+      }
     find_rank_ = true;
     panel_ = Panel::Find;
     side_open_ = true;

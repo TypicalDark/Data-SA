@@ -13,6 +13,8 @@ exports.
 | `parcels`, `parcels-<prov>` | PMTiles, MVT | `export_tiles.py --pack parcels` | parcel |
 | `h3`, `places` | PMTiles, MVT | `export_tiles.py` | hex, place |
 | `web-grid`, `web-water`, `web-risk`, `web-nature`, `web-vote`, `web-prop`, `web-land`, `web-places`, `web-move` | PMTiles, MVT | `tools/webpack/build_web_packs.py` | the website map's layers, one vector layer per website layer id (`x:pa` is `x_pa`) |
+| `raster-relief`, `raster-fire`, ... (ten) | PMTiles, PNG | `tools/webpack/build_raster_packs.py` | the website's images as 256 px tiles |
+| `find` | JSON | the website's `data/x/find.json`, copied | municipalities (outline, people, area, median value, ward winners), NTCSA free capacity, dams, airports, ports, power stations, towns; served at `/v1/data/find` |
 | `pack` | SQLite, `gsa-pack/1` | `export_pack.py` | tree, metric, parcel, valuation, node, edge, series, value, source, snapshot, search (FTS5), pack_info |
 
 ## Privacy (POPIA)

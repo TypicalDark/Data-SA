@@ -135,6 +135,20 @@ paths:
               schema: { $ref: "#/components/schemas/Area" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/data/{pack}:
+    get:
+      operationId: getDataPack
+      summary: A JSON data pack as installed (the Find data, ...)
+      parameters:
+        - $ref: "#/components/parameters/Pack"
+      responses:
+        "200":
+          description: The pack's JSON, unchanged
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/sources:
     get:
       operationId: listSources
@@ -202,7 +216,7 @@ components:
       required: [id, kind, version, bytes]
       properties:
         id: { type: string }
-        kind: { type: string, enum: [tiles, sqlite] }
+        kind: { type: string, enum: [tiles, sqlite, json] }
         version: { type: string, description: "Date version such as `admin-2026-11` or `dev`" }
         bytes: { type: integer }
         title: { type: string }

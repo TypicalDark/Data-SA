@@ -476,6 +476,20 @@ void App::ui_spot(Card& c) {
       ImGui::TextColored(col(kMuted), "Loading ...");
     }
   }
+  // the website's spot summary from the Find data: town, dam, free capacity, airport, port, your conditions
+  if (fdata_) {
+    const auto lines = find::spot(*fdata_, c.lon, c.lat, rules_);
+    if (!lines.empty()) section(font_mono_, "AROUND THIS SPOT");
+    for (const auto& [head, text] : lines) {
+      ImGui::PushTextWrapPos(0);
+      ImGui::TextColored(col(kInk), "%s", text.c_str());
+      ImGui::PopTextWrapPos();
+      ImGui::PushFont(font_small_);
+      ImGui::TextColored(col(kFaint), "%s", head.c_str());
+      ImGui::PopFont();
+      ImGui::Spacing();
+    }
+  }
   // the nearest grid points among what the map has loaded
   struct Near {
     double km;
@@ -634,92 +648,205 @@ void App::ui_panel_find() {
             find_rank_ ? "Rank what's in view" : "Find places where ...", "", "");
   ImGui::PushFont(font_mono_);
   const float tw = (ImGui::GetContentRegionAvail().x - 4) / 2;
-  if (chip("Find places", !find_rank_, ImVec2(tw, 26))) find_rank_ = false;
+  if (chip("Find places where ...", !find_rank_, ImVec2(tw, 26))) find_rank_ = false;
   ImGui::SameLine(0, 4);
-  if (chip("Rank in view", find_rank_, ImVec2(tw, 26))) find_rank_ = true;
+  if (chip("Rank what's in view", find_rank_, ImVec2(tw, 26))) find_rank_ = true;
   ImGui::PopFont();
   ImGui::Spacing();
+  auto copy_csv = [&](const std::vector<Row>& rows) {
+    auto q = [](const std::string& v) {
+      if (v.find_first_of("\",") == std::string::npos) return v;
+      std::string o = "\"";
+      for (char ch : v) o += ch == '"' ? std::string("\"\"") : std::string(1, ch);
+      return o + "\"";
+    };
+    std::string csv = "name,value,detail\n";
+    for (const auto& r : rows) csv += q(r.name) + "," + q(r.value) + "," + q(r.sub) + "\n";
+    ImGui::SetClipboardText(csv.c_str());
+    toast(std::to_string(rows.size()) + " rows copied as CSV");
+  };
+
   if (find_rank_) {
-    ui_panel_list(true);
+    // Rank: the website's RANK list; substations and power stations come from the drawn grid
+    const auto& defs = find::rank_defs();
+    const find::RankDef* cur = &defs[0];
+    for (const auto& d : defs)
+      if (rank_key_ == d.k) cur = &d;
+    ImGui::SetNextItemWidth(-1);
+    if (ImGui::BeginCombo("##rank", cur->label)) {
+      for (const auto& d : defs)
+        if (ImGui::Selectable(d.label, cur == &d)) {
+          rank_key_ = d.k;
+          if (opt_.screenshot.empty()) {
+            settings_->data()["rank"] = rank_key_;
+            settings_->save();
+          }
+        }
+      ImGui::EndCombo();
+    }
+    std::vector<Row> rows;
+    if (!cur->needs_data) {
+      rows = rows_in_view(cur->k);
+    } else if (fdata_) {
+      double x0, y0, x1, y1;
+      cam_.to_world(side_width(), 0, x0, y0);
+      cam_.to_world(cam_.w, cam_.h - kStatusH, x1, y1);
+      const double b[4] = {geo::lon_of(x0), geo::lat_of(y1), geo::lon_of(x1), geo::lat_of(y0)};
+      for (const auto& r : find::rank(*fdata_, cur->k, b)) {
+        Row w;
+        w.name = r.name;
+        w.value = r.value;
+        w.sub = r.sub;
+        w.x = cur->ascending ? 0 : r.x;  // no bars when lowest comes first
+        w.colour = r.colour;
+        w.lon = r.lon;
+        w.lat = r.lat;
+        w.area = r.area;
+        rows.push_back(std::move(w));
+      }
+    }
+    ImGui::PushFont(font_mono_);
+    section(font_mono_, ("IN VIEW \xc2\xb7 " + std::to_string(rows.size())).c_str());
+    if (!rows.empty() && chip("CSV", false, ImVec2(44, 20))) copy_csv(rows);
+    ImGui::PopFont();
+    if (cur->needs_data && !fdata_) ImGui::TextColored(col(kFaint), "Needs the Find data pack (find.json).");
+    else if (rows.empty())
+      ImGui::TextColored(col(kFaint), cur->needs_data ? "Nothing of this kind in view. Zoom out or pan."
+                                                      : "Put the grid on the map (key 2) and zoom in to rank it.");
+    if (!rows.empty()) rows_list(rows, "rank", -24);
+    else ImGui::Dummy(ImVec2(0, std::max(0.0f, ImGui::GetContentRegionAvail().y - 24)));
+    ImGui::TextColored(col(kFaint), "The list follows the map as you pan and zoom.");
     return;
   }
-  // presets, as on the website; the parts that need distances wait for the find pack
-  struct Preset {
-    const char* name;
-    FindQuery q;
-    const char* needs;
-  };
-  static const Preset presets[] = {
-      {"Solar farm", {0, 0, 0, 0, 0, "Solar farm"}, "within 40 km of a substation with 100 MW free"},
-      {"Data centre", {300, 0, 0, 0, 0, "Data centre"}, "within 15 km of 20 MW free and 60 km of an airport"},
-      {"Warehouse near a port", {0, 0, 0, 0, 0, "Warehouse near a port"}, "within 120 km of a port and 20 km of a town"},
-      {"Affordable, busy towns", {100, 0, 0, 0, 600000, "Affordable, busy towns"}, ""},
-      {"Water-secure areas", {0, 0, 0, 0, 0, "Water-secure areas"}, "within 30 km of a dam over 75% full"},
-  };
-  section(font_mono_, "PRESETS");
-  ImGui::PushFont(font_mono_);
-  float x = 0;
-  const float avail = ImGui::GetContentRegionAvail().x;
-  for (const auto& p : presets) {
-    const float bw = ImGui::CalcTextSize(p.name).x + 14;
-    if (x > 0 && x + bw > avail) x = 0;
-    else if (x > 0) ImGui::SameLine(0, 4);
-    x += bw + 4;
-    if (chip(p.name, find_.preset == p.name, ImVec2(bw, 24))) find_ = p.q;
-    if (p.needs[0] && ImGui::IsItemHovered()) ImGui::SetTooltip("Also %s: needs the find pack (milestone B)", p.needs);
+
+  if (!fdata_) {
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextColored(col(kFaint), fdata_req_.valid() ? "Loading the Find data ..."
+                                                       : "Find needs the Find data pack (find.json in the packs folder).");
+    ImGui::PopTextWrapPos();
+    return;
   }
-  ImGui::PopFont();
-
-  section(font_mono_, "CONDITIONS");
-  auto num = [&](const char* label, double& v, double step, const char* unit) {
-    ImGui::PushID(label);
-    ImGui::TextColored(col(kMuted), "%s", label);
-    ImGui::SameLine(170);
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 50);
-    if (ImGui::InputDouble("##v", &v, step, step * 10, "%.0f")) find_.preset.clear();
-    v = std::max(0.0, v);
-    ImGui::SameLine();
-    ImGui::TextColored(col(kFaint), "%s", unit);
+  const auto& d = *fdata_;
+  {
+    const std::string head = rules_.empty() ? "CONDITIONS FROM ANY TOPIC, PER MUNICIPALITY"
+                                            : std::to_string(fpass_.size()) + " OF " + std::to_string(d.munis.size()) +
+                                                  " MUNICIPALITIES MATCH";
+    section(font_mono_, head.c_str());
+  }
+  // the conditions, each editable in place
+  bool changed = false;
+  int remove = -1;
+  for (size_t i = 0; i < rules_.size(); ++i) {
+    auto& r = rules_[i];
+    const find::Def* def = find::def(r.k);
+    ImGui::PushID(int(i));
+    const ImVec2 p0 = ImGui::GetCursorScreenPos();
+    const float w = ImGui::GetContentRegionAvail().x;
+    ImGui::GetWindowDrawList()->AddRectFilled(p0, ImVec2(p0.x + w, p0.y + 58), u32(kHover), 6);
+    ImGui::SetCursorScreenPos(ImVec2(p0.x + 8, p0.y + 6));
+    ImGui::TextColored(col(kInk), "%s", find::text(r).c_str());
+    ImGui::SetCursorScreenPos(ImVec2(p0.x + w - 26, p0.y + 4));
+    if (ImGui::SmallButton("x")) remove = int(i);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove condition");
+    ImGui::SetCursorScreenPos(ImVec2(p0.x + 8, p0.y + 28));
+    for (size_t fi = 0; fi < def->fields.size(); ++fi) {
+      const auto& f = def->fields[fi];
+      const std::string n = f.f;
+      if (fi) ImGui::SameLine(0, 10);
+      ImGui::PushID(f.f);
+      if (n == "p") {
+        ImGui::SetNextItemWidth(120);
+        if (ImGui::BeginCombo("##p", r.p.c_str())) {
+          for (const auto& party : find::parties())
+            if (ImGui::Selectable(party.c_str(), party == r.p)) {
+              r.p = party;
+              changed = true;
+            }
+          ImGui::EndCombo();
+        }
+      } else {
+        double* v = n == "v" ? &r.v : n == "km" ? &r.km : n == "pct" ? &r.pct : &r.mw;
+        ImGui::SetNextItemWidth(def->fields.size() > 1 ? 82.0f : 140.0f);
+        if (ImGui::InputDouble("##v", v, 0, 0, "%.0f")) changed = true;
+        *v = std::max(0.0, *v);
+        ImGui::SameLine(0, 4);
+        ImGui::TextColored(col(kFaint), "%s", f.unit);
+      }
+      ImGui::PopID();
+    }
+    ImGui::SetCursorScreenPos(ImVec2(p0.x, p0.y + 62));
+    ImGui::Dummy(ImVec2(w, 0));
     ImGui::PopID();
-  };
-  num("People per km\xc2\xb2 at least", find_.dens_min, 10, "");
-  num("People per km\xc2\xb2 at most", find_.dens_max, 10, "0=any");
-  num("People at least", find_.pop_min, 10000, "");
-  num("Median value at least", find_.val_min, 50000, "R");
-  num("Median value at most", find_.val_max, 50000, "R");
-  ImGui::PushTextWrapPos(0);
-  ImGui::TextColored(col(kFaint), "Near a substation, dam, town, airport or port, and party won, come with the find pack (milestone B).");
-  ImGui::PopTextWrapPos();
-  if (chip("Reset", false, ImVec2(70, 24))) find_ = FindQuery{};
+  }
+  if (remove >= 0) {
+    rules_.erase(rules_.begin() + remove);
+    changed = true;
+  }
+  if (changed) set_rules(rules_);
 
-  // results over municipalities
+  // add a condition, grouped like the website's select; or start from a preset
+  const float hw = (ImGui::GetContentRegionAvail().x - 6) / 2;
+  ImGui::SetNextItemWidth(hw);
+  if (ImGui::BeginCombo("##add", "+ Add a condition")) {
+    for (const char* g : {"People", "Property", "Elections", "Water", "Places", "Power", "Transport"}) {
+      ImGui::TextColored(col(kFaint), "%s", g);
+      for (const auto& def : find::defs())
+        if (std::string(def.group) == g && ImGui::Selectable(def.label)) {
+          auto r = rules_;
+          r.push_back(find::make(def.k));
+          set_rules(r);
+        }
+    }
+    ImGui::EndCombo();
+  }
+  ImGui::SameLine(0, 6);
+  ImGui::SetNextItemWidth(hw);
+  if (ImGui::BeginCombo("##preset", "Start from ...")) {
+    for (const auto& p : find::presets())
+      if (ImGui::Selectable(p.name)) {
+        set_rules(p.rules);
+        toast(std::string(p.name) + ": " + std::to_string(fpass_.size()) + " municipalities match");
+      }
+    ImGui::EndCombo();
+  }
+  if (rules_.empty()) {
+    ImGui::Spacing();
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextColored(col(kMuted), "Add a condition, or start from a preset such as Solar farm or Data centre. "
+                                    "Municipalities that meet every condition stay lit and the rest go dark.");
+    ImGui::PopTextWrapPos();
+    return;
+  }
+
   std::vector<Row> rows;
-  const auto munis = all_munis();
-  for (const json* m : munis) {
-    const json& mt = (*m)["metrics"];
-    const double pop = mt.value("pop_est", -1.0), val = mt.value("value_median", -1.0), km2 = m->value("area_km2", 0.0);
-    const double dens = pop >= 0 && km2 > 0 ? pop / km2 : -1;
-    if (find_.dens_min > 0 && dens < find_.dens_min) continue;
-    if (find_.dens_max > 0 && (dens < 0 || dens > find_.dens_max)) continue;
-    if (find_.pop_min > 0 && pop < find_.pop_min) continue;
-    if (find_.val_min > 0 && val < find_.val_min) continue;
-    if (find_.val_max > 0 && (val < 0 || val > find_.val_max)) continue;
+  for (const auto& m : d.munis) {
+    if (!fpass_.count(m.code)) continue;
     Row r;
-    r.name = (*m)["name"];
-    r.area = (*m)["id"];
-    r.x = pop;
-    r.value = pop >= 0 ? fmt_num(pop) : "no data";
-    std::string s;
-    if (dens >= 0) s = fmt_num(dens) + " per km\xc2\xb2";
-    if (val >= 0) s += (s.empty() ? "" : " \xc2\xb7 ") + fmt_rand(val) + " median";
-    r.sub = s;
-    r.colour = style::hex("#3ddc84").packed();
-    rows.push_back(r);
+    r.name = m.name;
+    r.area = m.code;
+    r.x = std::max(0.0, m.pop);
+    r.value = find::fmt_num(m.pop);
+    r.sub = m.prov + " \xc2\xb7 " + find::why(d, m, rules_);
+    r.colour = u32(kAccent);
+    rows.push_back(std::move(r));
   }
   std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.x > b.x; });
-  section(font_mono_, munis.empty() ? "LOADING MUNICIPALITIES ..."
-                                    : (std::to_string(rows.size()) + " OF " + std::to_string(munis.size()) + " MUNICIPALITIES MATCH").c_str());
-  rows_list(rows, "found", 0);
+  ImGui::PushFont(font_mono_);
+  section(font_mono_, "MUNICIPALITIES THAT MATCH \xc2\xb7 BY PEOPLE");
+  if (!rows.empty() && chip("CSV", false, ImVec2(44, 20))) copy_csv(rows);
+  ImGui::SameLine(0, 4);
+  if (chip("Clear", false, ImVec2(56, 20))) {
+    set_rules({});
+    ImGui::PopFont();
+    return;
+  }
+  ImGui::PopFont();
+  if (rows.empty()) ImGui::TextColored(col(kFaint), "No municipality meets every condition. Loosen one.");
+  else rows_list(rows, "found", -40);
+  ImGui::PushTextWrapPos(0);
+  ImGui::TextColored(col(kFaint), "Distances run from the municipal boundary. Click a municipality to fly there, then "
+                                  "right-click a spot to check it exactly.");
+  ImGui::PopTextWrapPos();
 }
 
 void App::ui_panel_list(bool rank) {

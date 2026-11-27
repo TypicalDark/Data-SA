@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <iterator>
 
 namespace gsa {
 
@@ -72,6 +73,7 @@ std::shared_ptr<const PackSet> PackStore::load() const {
       const auto stem = e.path().stem().string();
       if (ext == ".pmtiles" && valid_pack_id(stem)) found.push_back({stem, "tiles", "dev", e.path(), 0});
       if (ext == ".sqlite" && stem == "pack") found.push_back({"pack", "sqlite", "dev", e.path(), 0});
+      if (ext == ".json" && stem != "installed" && valid_pack_id(stem)) found.push_back({stem, "json", "dev", e.path(), 0});
     }
   }
 
@@ -87,6 +89,11 @@ std::shared_ptr<const PackSet> PackStore::load() const {
                                  ", which this back-end cannot read; update the app first");
       }
       set->db = pool;
+    } else if (p.kind == "json") {
+      std::ifstream in(p.file, std::ios::binary);
+      auto body = std::make_shared<std::string>(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+      if (!nlohmann::json::accept(*body)) throw std::runtime_error("pack " + p.id + " is not valid JSON");
+      set->data[p.id] = std::move(body);
     } else {
       throw std::runtime_error("unknown pack kind " + p.kind);
     }

@@ -66,8 +66,18 @@ that should sync later (saved views, watchlists) will go through the API.
   eye and remove buttons, legend under the colour layer, base toggles); layer catalogue (F2); breadcrumb
   pill; 3D, zoom and home buttons; status bar. Cards carry a type tag, title, data line and a function
   strip (DES, HERE, NEAR, TR, FAIL, FEED, PATH, REACH, MEAS, WATCH, GO, COPY, PNG; unbuilt ones are shown
-  greyed). Panels: Find with the website's presets, Rank and List of what is in view, Areas, saved Views,
-  Watchlist, Keys, Measure. Right-click opens a spot card. Each window's rectangle goes to the label
+  greyed). Panels: Find, Rank and List of what is in view, Areas, saved Views, Watchlist, Keys, Measure.
+  Right-click opens a spot card.
+- **Find and Rank** (`find.cpp`, the website's patch_ui2). The `find` JSON pack (`/v1/data/find`) holds
+  every municipality's outline and figures and the point lists (free grid capacity, dams, airports,
+  ports, power stations, towns). Twelve conditions (density, people, median value, party, and "within
+  N km of" a dam, town, substation with free MW, power station, airport or port, measured from the
+  boundary) are tested per municipality; the five presets, editable numbers, why-it-matched text and
+  CSV copy match the website. Matching municipalities get an accent outline and the rest a dark shade,
+  drawn with the admin lines so it covers every pack's fills and images. Rank lists seven things in the
+  current view (substations, power stations, free capacity, dams lowest first, municipalities by value
+  or people, airports). The spot card adds the website's summary (nearest town, dam, free capacity,
+  airport, port, and which Find conditions the spot fails). Saved views keep the conditions. Each window's rectangle goes to the label
   engine as a blocker.
 - **Command line** (`commands.cpp`). An UPPERCASE first word or a leading `:` is a command (`GO`, `ADD`,
   `RM`, `HIDE`, `FIND`, `RANK`, `SAVE`, `VIEW` ...); `name CODE` finds the subject and runs the function

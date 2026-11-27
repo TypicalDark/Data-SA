@@ -21,7 +21,7 @@ inline const std::vector<int> kPackSchemas = {1};
 
 struct PackInfo {
   std::string id;
-  std::string kind;  // "tiles" or "sqlite"
+  std::string kind;  // "tiles", "sqlite" or "json"
   std::string version;
   std::filesystem::path file;
   uint64_t bytes = 0;
@@ -32,6 +32,8 @@ struct PackInfo {
 struct PackSet {
   std::map<std::string, std::shared_ptr<const pmtiles::Archive>> tiles;
   std::shared_ptr<sql::Pool> db;  // the attribute pack, may be null
+  // Small JSON data packs (the Find data, ...), checked to parse when loaded, served as they are.
+  std::map<std::string, std::shared_ptr<const std::string>> data;
   std::vector<PackInfo> info;
 };
 

@@ -99,9 +99,12 @@ struct MapStyle {
   bool names = true;
   std::vector<Extra> extra;  // website layers, bottom first
   std::vector<std::string> rasters;  // image packs to draw over the fills, bottom first
+  // Find: municipalities that meet every condition stay lit and the rest go dark
+  bool find_on = false;
+  std::set<std::string> find_pass;
   bool operator==(const MapStyle& o) const {
     return fill == o.fill && muni_borders == o.muni_borders && lines == o.lines && subs == o.subs && plants == o.plants &&
-           names == o.names && extra == o.extra && rasters == o.rasters;
+           names == o.names && extra == o.extra && rasters == o.rasters && find_on == o.find_on && find_pass == o.find_pass;
   }
   bool operator!=(const MapStyle& o) const { return !(*this == o); }
 };

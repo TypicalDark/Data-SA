@@ -70,6 +70,16 @@ void build(const std::string& pack, const mvt::Tile& tile, const layers::MapStyl
         const auto c = style::muni_fill(ms.fill, f);
         add_polygon(f, c ? c->packed() : nodata, out.fill);
         outline(f, 0.35f, style::muni_border().packed(), 5.2f, out.lines);
+        if (ms.find_on) {
+          // with the lines so the shade covers every pack's fills and images (the website's findpass layer)
+          if (ms.find_pass.count(f.str("id"))) {
+            auto a = style::accent();
+            a.a = 230;
+            outline(f, 1.0f, a.packed(), 0, out.lines);
+          } else {
+            add_polygon(f, style::Rgba{6, 10, 14, 150}.packed(), out.lines);
+          }
+        }
       }
     }
     if (const auto* l = tile.layer("province")) {

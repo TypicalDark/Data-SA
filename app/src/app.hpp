@@ -16,6 +16,7 @@
 
 #include "api_client.hpp"
 #include "geo.hpp"
+#include "find.hpp"
 #include "layers.hpp"
 #include "map_renderer.hpp"
 #include "settings.hpp"
@@ -172,10 +173,15 @@ class App {
   bool side_open_ = true;
   Panel panel_ = Panel::None;
   bool find_rank_ = false;  // Find panel tab
-  struct FindQuery {         // the website's RDEF conditions that municipality data can answer
-    double dens_min = 0, dens_max = 0, pop_min = 0, val_min = 0, val_max = 0;
-    std::string preset;
-  } find_;
+  // Find and Rank (find.hpp) over the Find data pack
+  std::optional<find::Data> fdata_;
+  JsonFuture fdata_req_;
+  std::vector<find::Rule> rules_;
+  std::set<std::string> fpass_;
+  std::string rank_key_ = "subs";
+  std::string find_toast_;
+  void set_rules(std::vector<find::Rule> r);
+  layers::MapStyle map_style_now() const;
   char view_name_[64] = {};
   std::string list_layer_;
   std::vector<Card> cards_{Card{}};

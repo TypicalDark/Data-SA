@@ -336,6 +336,15 @@ void mount_api(httplib::Server& srv, ApiConfig cfg) {
   srv.Get(R"(/v1/tiles/([a-z0-9][a-z0-9_-]{0,63})/(\d{1,2})/(\d{1,8})/(\d{1,8})(?:\.(?:mvt|pbf|png|jpg|webp))?)",
           [ctx](const httplib::Request& req, httplib::Response& res) { handle_tile(*ctx, req, res); });
 
+  srv.Get(R"(/v1/data/([a-z0-9][a-z0-9_-]{0,63}))", [ctx](const httplib::Request& req, httplib::Response& res) {
+    const std::string id = req.matches[1];
+    const auto set = ctx->packs();
+    const auto it = set->data.find(id);
+    if (it == set->data.end()) return send_error(res, 404, "no data pack " + id);
+    res.set_header("Cache-Control", "private, max-age=3600");
+    res.set_content(*it->second, "application/json");
+  });
+
   srv.Get("/v1/search", [ctx](const httplib::Request& req, httplib::Response& res) { handle_search(*ctx, req, res); });
 
   srv.Get(R"(/v1/areas/([A-Za-z0-9_.-]{1,40}))", [ctx](const httplib::Request& req, httplib::Response& res) {
