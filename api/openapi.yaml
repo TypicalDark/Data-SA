@@ -159,7 +159,7 @@ paths:
         - name: sg21
           in: path
           required: true
-          description: 21-character Surveyor-General code, for example `C05200010000002300000`.
+          description: 21-character Surveyor-General code, for example `C05200010000002300000`. City plots without an SG code have a store key, `X` plus 20 hex digits, and no `sg` prefixes.
           schema: { type: string, pattern: "^[A-Z][0-9A-Z]{20}$" }
       responses:
         "200":

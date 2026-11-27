@@ -145,7 +145,8 @@ void handle_parcel(const PackSet& set, const std::string& sg21, httplib::Respons
               suburb = r.opt_text(7).value_or("");
             });
   // the SG code is a tree too: registration division / township / parcel / portion
-  out["sg"] = {{"division", sg21.substr(0, 4)}, {"township", sg21.substr(0, 8)}, {"parcel", sg21.substr(0, 16)}};
+  // (keys starting with X are the store's own keys for city plots that have no SG code)
+  if (sg21[0] != 'X') out["sg"] = {{"division", sg21.substr(0, 4)}, {"township", sg21.substr(0, 8)}, {"parcel", sg21.substr(0, 16)}};
 
   // breadcrumb: the ward's chain from the place tree (national pack), then the suburb
   json crumbs = json::array();

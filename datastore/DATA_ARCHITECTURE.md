@@ -255,7 +255,7 @@ The project folder holds 9.2 of its 10 GB and cannot take the raw archive or the
 |---|---|---|---|
 | Raw archive | 12 GB without the big sets, about 25-30 GB with DFFE erven, OpenSky and Copernicus | your PC, for example `D:\GridOfSA\raw` | external drive, or a private Cloudflare R2 / Backblaze B2 bucket (about R10 per month for 30 GB) |
 | PostGIS database | about 25-35 GB with 9 M parcels and indexes (9 M parcels at about 2 KB each, 2.9 M roll rows, 21 M climate values) | your PC (Docker) | rebuildable from the archive; `pg_dump` weekly |
-| PMTiles + SQLite packs (one release) | 4.4 GB national: plot tiles 0.96 GB in nine province packs, attribute pack 3.2 GB, the rest 0.2 GB | cloud bucket for the app, copy on your PC | the bucket |
+| PMTiles + SQLite packs (one release) | 5.0 GB national: plot tiles 1.09 GB and attribute packs 3.56 GB in nine province packs each, national pack 168 MB, the rest 0.2 GB | cloud bucket for the app, copy on your PC | the bucket |
 | This spec and the scripts | under 1 MB | the Data-SA repository, `datastore/` | GitHub |
 
 What this means for the project folder: once the archive and database exist on your PC, the processed
@@ -298,8 +298,20 @@ PostgreSQL 16.10, PostGIS 3.4, pgRouting 3.6, h3-pg 4.1, tippecanoe 2.49, on the
 | Attribute pack | 3.2 GB: plots 1.15 GB, search 1 GB, valuations 0.4 GB, packed climate 0.15 GB | 4 min |
 | Release | 15 packs, 4.4 GB, served by `gsa-backend`; plot card in 8 ms, FEED trace in under 40 ms | |
 
-Next size win: split the attribute pack's plot, valuation and plot-search rows per province like the tiles,
-so a user who installs one province downloads about a ninth of the 2.7 GB plot part.
+### National run 2 (27 November 2026, night): city plots, all value sources, province packs
+
+| Step | Result | Time |
+|---|---|---|
+| Values | rolls reloaded from the rebuilt `parcel_values` (2,415,817 rows, 157 municipalities), KZN COGTA 658,895 rows, city values 833,568 rows (Joburg GV2023, Polokwane); 127,089 lower-ranked rows flagged superseded | 20 s + 17 s + in the city load |
+| City plots | Joburg 752,969, Ekurhuleni 673,888, Polokwane 265,814, Sol Plaatje 64,249; 72,341 older SG parcels superseded (kept) | 35 min |
+| Store | 9,155,293 plots, 9,082,987 drawn, 98.8% in a ward; 3.25 M plots valued | 50 min tree build |
+| Tiles | plots 1.09 GB in nine province packs (Gauteng 253 MB) | 40 min |
+| Attribute packs | national `pack` 168 MB + nine province packs 3.56 GB (Gauteng 1.02 GB, Northern Cape 137 MB) | 8 min |
+| Website plots | 8,274,689 plots (Cape Town left out, as on the site), 3,184,397 valued, 213 bundles, 329 MB. The live site has 8,390,716 and 3,211,035: the site keeps duplicate shapes that share one SG code (1.4% more shapes), the store keeps one plot per code | 20 min |
+| Release | 23 packs, 5.0 GB, served by `gsa-backend`: plot card 2-10 ms from the province packs, search over all packs 15-100 ms | |
+
+A user who installs one province now downloads the national pack (168 MB), that province's attribute
+pack and its plot tiles plus the national maps, for example about 0.95 GB for the Western Cape instead of 5 GB.
 
 ## 10. Running it on your PC
 
