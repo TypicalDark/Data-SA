@@ -9,6 +9,7 @@ your PC to a server without changes.
 | | |
 |---|---|
 | ![Energy and grid, Gauteng](docs/screenshots/energy-gauteng.png) | ![Elections, KwaZulu-Natal](docs/screenshots/elections-kzn.png) |
+| ![Energy and grid, Cape Town: names and voltages along the lines](docs/screenshots/energy-cape-town.png) | ![Property, Gauteng](docs/screenshots/property-gauteng.png) |
 
 ## How it fits together
 

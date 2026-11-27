@@ -33,6 +33,9 @@ jobs:
             xvfb-run -a -s "-screen 0 1600x1000x24" ./build/app/gsa --size 1600x1000 --topic $t --frames 900 \
               --screenshot shot-$t.png
           done
+          # labels at street level: names beside icons, voltages along the lines
+          xvfb-run -a -s "-screen 0 1600x1000x24" ./build/app/gsa --size 1600x1000 --topic energy \
+            --at 18.6,-33.9,9.5 --frames 900 --screenshot shot-energy-cape-town.png
       - uses: actions/upload-artifact@v4
         with:
           name: screenshots-linux

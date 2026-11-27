@@ -90,20 +90,7 @@ void build(const std::string& pack, const mvt::Tile& tile, Topic topic, Mesh& ou
         for (const auto& part : f.parts) add_line(part, style::line_width_px(kv, true) * 0.5f, c.packed(), kv_minz(kv), inferred, out.lines);
       }
     }
-    if (const auto* l = tile.layer("facility")) {
-      for (const auto& f : l->features) {
-        if (f.type != mvt::GeomType::Point || f.parts.empty()) continue;
-        const bool station = f.str("kind") == "power_station";
-        const double kv = f.num("kv").value_or(0), mw = f.num("mw").value_or(0);
-        const float minz = station ? (mw >= 500 ? 4.0f : mw >= 50 ? 6.0f : 7.5f) : (kv >= 275 ? 5.5f : kv >= 132 ? 7.0f : 8.0f);
-        const float r = station ? float(std::clamp(2.5 + std::sqrt(mw) / 5.0, 3.0, 11.0)) : (kv >= 400 ? 4.6f : kv >= 220 ? 4.0f : 3.2f);
-        const auto fill = station ? style::plant(f.str("fuel")) : style::volt(kv);
-        for (const auto& p : f.parts[0]) {
-          add_square(p.x, p.y, r + 1.2f, style::background().packed(), minz, out.symbols);  // dark halo
-          add_square(p.x, p.y, r, fill.packed(), minz, out.symbols);
-        }
-      }
-    }
+    // facilities are icons in the text pass (map_labels.cpp)
   }
 }
 

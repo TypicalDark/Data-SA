@@ -58,7 +58,7 @@ class App {
   void ui_area(const std::string& id);
   void ui_key();
   void ui_status();
-  void ui_labels();
+  void block_window();
   void handle_input();
   void poll_async();
 
@@ -110,6 +110,8 @@ class App {
   std::string hover_name_;
   std::string toast_;
   double toast_until_ = 0;
+  double last_frame_t_ = 0;
+  std::vector<text::Rect> blockers_;  // interface windows this frame, logical pixels
   int frames_ = 0;
   int settled_frames_ = 0;
   std::vector<TileKey> last_need_;

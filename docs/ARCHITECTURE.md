@@ -40,12 +40,21 @@ that should sync later (saved views, watchlists) will go through the API.
 - **Tiles.** Four loader threads fetch through the API, inflate and decode MVT (protozero). The main
   thread tessellates (earcut for polygons, extruded quads for lines) and uploads. While a tile loads,
   its nearest loaded ancestor stands in. Least recently drawn tiles are evicted past 600.
+- **Text and icons.** A second pipeline draws map text and point icons from one distance-field
+  atlas (R8, 1024 x 1024): glyphs are rendered on first use with stb_truetype at 24 px and drawn
+  at any size with a sharp edge and a halo from the same texture; icons (square, circle, diamond,
+  triangle) are distance fields computed from their shapes. Each frame the label engine
+  (`text/labels.cpp`, no GPU) takes candidates from the drawn tiles (`map_labels.cpp`), places them
+  in priority order on a collision grid, keeps them out of every interface window, fades them in
+  and out over 0.2 s, and bends line labels along their line (upright, no sharp turns, one repeat
+  per 420 px). Icons always draw and text steps around them, right of the icon first, then left.
 - **Topics.** The seven topics of the v7 design (Overview, People, Property, Water, Energy and grid,
   Elections, Transport). Changing topic re-colours cached tiles without refetching. The grid draws only
   in its own topic, never by default.
-- **UI.** Dear ImGui drawn in the same render pass: topic switcher, search with type tags, one left
-  panel with a back stack (topic home, area card with breadcrumb, facts, function strip, children list),
-  key bottom right, status bar. Labels are drawn with greedy declutter and never under the panel.
+- **UI.** Dear ImGui drawn in the same render pass after the map: topic switcher, search with type
+  tags, one left panel with a back stack (topic home, area card with breadcrumb, facts, function strip,
+  children list), key bottom right, status bar. Each window's rectangle goes to the label engine as a
+  blocker.
 - **Shell role.** With no `--api`, `gsa` starts `gsa-backend` from its own folder on a random port with
   a random 256-bit token, waits for the ready line, and stops it on exit. On Windows a job object kills
   the back-end even if the app crashes.

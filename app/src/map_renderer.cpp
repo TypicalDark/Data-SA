@@ -24,7 +24,7 @@ struct Push {
 static_assert(sizeof(Push) == 32);
 }  // namespace
 
-MapRenderer::MapRenderer(vk::Context& ctx) : ctx_(ctx) {
+MapRenderer::MapRenderer(vk::Context& ctx) : ctx_(ctx), text_(ctx) {
   const VkDevice dev = ctx.device();
   VkShaderModule vs = ctx.shader(map_vert, sizeof(map_vert)), fs = ctx.shader(map_frag, sizeof(map_frag));
 
@@ -189,10 +189,49 @@ std::vector<TileKey> MapRenderer::drawable(const geo::Camera& cam, const std::ve
   return out;
 }
 
-void MapRenderer::draw(VkCommandBuffer cmd, const geo::Camera& cam, float dpr, const std::vector<PackZoom>& packs) {
+bool MapRenderer::load_fonts(const std::string& dir) {
+  fonts_.regular = atlas_.add_font(dir + "/fonts/SpaceGrotesk-Regular.ttf");
+  fonts_.medium = atlas_.add_font(dir + "/fonts/SpaceGrotesk-Medium.ttf");
+  fonts_.mono = atlas_.add_font(dir + "/fonts/IBMPlexMono-Regular.ttf");
+  const bool ok = fonts_.regular >= 0 && fonts_.medium >= 0 && fonts_.mono >= 0;
+  // fall back to whichever face loaded
+  const int any = std::max({fonts_.regular, fonts_.medium, fonts_.mono});
+  for (int* f : {&fonts_.regular, &fonts_.medium, &fonts_.mono})
+    if (*f < 0) *f = any;
+  return ok;
+}
+
+void MapRenderer::prepare(const geo::Camera& cam, const std::vector<PackZoom>& packs,
+                          const std::vector<text::Rect>& blockers, double dt) {
+  keys_ = drawable(cam, packs);
+  text_verts_.clear();
+  if (atlas_.font_count() == 0) return;
+  const int generation = atlas_.generation();
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    engine_.begin(float(cam.w), float(cam.h), blockers);
+    const double scale = cam.scale();
+    for (const auto& k : keys_) {
+      const auto& g = tiles_.at(k);
+      if (!g.tile) continue;
+      map_labels::TileOnScreen t;
+      t.tile = g.tile.get();
+      t.pack = k.pack;
+      t.id = k.id;
+      cam.to_screen(k.id.ox(), k.id.oy(), t.ox, t.oy);
+      t.k = k.id.size() * scale;
+      map_labels::collect(t, topic_, cam.zoom, fonts_, engine_);
+    }
+    engine_.finish(dt, text_verts_);
+    // the atlas filled up and was cleared mid-frame: lay out once more against the new atlas
+    if (atlas_.generation() == generation) break;
+  }
+}
+
+void MapRenderer::upload(VkCommandBuffer cmd) { text_.upload(cmd, atlas_); }
+
+void MapRenderer::draw(VkCommandBuffer cmd, const geo::Camera& cam, float dpr) {
   ++frame_;
-  const auto keys = drawable(cam, packs);
-  labels_.clear();
+  const auto& keys = keys_;
   vertices_ = 0;
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
   const VkExtent2D ext = ctx_.extent();
@@ -207,10 +246,10 @@ void MapRenderer::draw(VkCommandBuffer cmd, const geo::Camera& cam, float dpr, c
   // three passes so borders and symbols always sit above every tile's fills
   for (int pass = 0; pass < 3; ++pass) {
     for (const auto& k : keys) {
-      auto& g = tiles_.at(k);
+      auto it = tiles_.find(k);
+      if (it == tiles_.end()) continue;
+      auto& g = it->second;
       g.used = frame_;
-      if (pass == 0 && k.pack == "admin" && g.tile)
-        mesh::labels(*g.tile, k.id.ox(), k.id.oy(), k.id.size(), labels_);
       if (!g.buf.buf) continue;
       const uint32_t first = pass == 0 ? 0 : pass == 1 ? g.fill : g.fill + g.lines;
       const uint32_t count = pass == 0 ? g.fill : pass == 1 ? g.lines : g.symbols;
@@ -227,6 +266,8 @@ void MapRenderer::draw(VkCommandBuffer cmd, const geo::Camera& cam, float dpr, c
       vertices_ += count;
     }
   }
+  text_.draw(cmd, text_verts_, dpr);
+  vertices_ += text_verts_.size();
 }
 
 const mvt::Feature* MapRenderer::pick(double wx, double wy, const std::string& layer, double zoom) const {

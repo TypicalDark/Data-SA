@@ -6,7 +6,11 @@
 #include <vector>
 
 #include "geo.hpp"
+#include "map_labels.hpp"
 #include "mesh.hpp"
+#include "text/atlas.hpp"
+#include "text/labels.hpp"
+#include "text_renderer.hpp"
 #include "style.hpp"
 #include "tiles.hpp"
 #include "vk_context.hpp"
@@ -29,10 +33,20 @@ class MapRenderer {
 
   // Tiles the view needs (for the loader), best first.
   std::vector<TileKey> needed(const geo::Camera& cam, const std::vector<PackZoom>& packs) const;
-  void draw(VkCommandBuffer cmd, const geo::Camera& cam, float dpr, const std::vector<PackZoom>& packs);
 
-  // Labels from the admin tiles currently drawn.
-  const std::vector<mesh::Label>& labels() const { return labels_; }
+  // Loads the label fonts from the assets folder; returns false when one is missing.
+  bool load_fonts(const std::string& assets_dir);
+  // Before the frame: picks the tiles to draw and places labels clear of `blockers` (interface
+  // rectangles, logical pixels). dt < 0 skips label fades.
+  void prepare(const geo::Camera& cam, const std::vector<PackZoom>& packs, const std::vector<text::Rect>& blockers,
+               double dt);
+  // Outside the render pass: uploads the glyph atlas when it changed.
+  void upload(VkCommandBuffer cmd);
+  // Inside the render pass: fills, lines, then icons and text.
+  void draw(VkCommandBuffer cmd, const geo::Camera& cam, float dpr);
+
+  bool labels_animating() const { return engine_.animating(); }
+  size_t labels_placed() const { return engine_.placed(); }
   // Municipality / province feature under a world point, from loaded admin tiles.
   const mvt::Feature* pick(double wx, double wy, const std::string& layer, double zoom) const;
   size_t tile_count() const { return tiles_.size(); }
@@ -54,7 +68,12 @@ class MapRenderer {
   VkPipeline pipeline_ = VK_NULL_HANDLE;
   style::Topic topic_ = style::Topic::Overview;
   std::map<TileKey, GpuTile> tiles_;
-  std::vector<mesh::Label> labels_;
+  std::vector<TileKey> keys_;  // drawn this frame, from prepare()
+  text::Atlas atlas_;
+  text::Engine engine_{atlas_};
+  TextRenderer text_;
+  map_labels::Fonts fonts_;
+  std::vector<text::Vertex> text_verts_;
   size_t vertices_ = 0;
   uint64_t frame_ = 0;
 };

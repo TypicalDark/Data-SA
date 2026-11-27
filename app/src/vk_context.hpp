@@ -43,7 +43,8 @@ class Context {
   // Starts a frame: waits for the frame slot, acquires an image, begins the command
   // buffer and the render pass (cleared to `clear`). Returns false when the swapchain
   // had to be rebuilt and the frame should be skipped.
-  bool begin_frame(const float clear[4]);
+  // `before_pass` records work that must sit outside the render pass (texture uploads).
+  bool begin_frame(const float clear[4], const std::function<void(VkCommandBuffer)>& before_pass = {});
   // Ends the render pass, optionally copies the image for a screenshot, submits and presents.
   void end_frame(std::vector<uint8_t>* screenshot_rgba = nullptr);
 
@@ -67,12 +68,12 @@ class Context {
   VkShaderModule shader(const uint32_t* spirv, size_t bytes);
 
   void request_rebuild() { rebuild_ = true; }
+  uint32_t memory_type(uint32_t bits, VkMemoryPropertyFlags props) const;
 
  private:
   void create_swapchain();
   void destroy_swapchain();
   void collect_garbage(bool all);
-  uint32_t memory_type(uint32_t bits, VkMemoryPropertyFlags props) const;
 
   GLFWwindow* win_;
   VkInstance instance_ = VK_NULL_HANDLE;

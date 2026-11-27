@@ -103,6 +103,7 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
   glfwSetWindowUserPointer(win_, this);
   vk_ = std::make_unique<vk::Context>(win_, opt_.validation);
   map_ = std::make_unique<MapRenderer>(*vk_);
+  if (!map_->load_fonts(opt_.assets_dir)) std::fprintf(stderr, "map label fonts missing under %s/fonts\n", opt_.assets_dir.c_str());
   api_ = std::make_unique<api::Client>(opt_.endpoint);
   loader_ = std::make_unique<TileLoader>(opt_.endpoint, 4);
   init_imgui();
@@ -273,23 +274,30 @@ void App::frame() {
   ImGui_ImplGlfw_NewFrame();
   ImGui::NewFrame();
   handle_input();
+  blockers_.clear();
   ui();
   ImGui::Render();
 
+  // labels go where the interface left room; screenshots skip the fades
+  const double now = now_s();
+  const double dt = opt_.screenshot.empty() ? std::min(0.1, now - last_frame_t_) : -1.0;
+  last_frame_t_ = now;
+  map_->prepare(cam_, packs_, blockers_, dt);
+
   const auto bg = style::background();
   const float clear[4] = {bg.r / 255.0f, bg.g / 255.0f, bg.b / 255.0f, 1.0f};
-  if (!vk_->begin_frame(clear)) return;
+  if (!vk_->begin_frame(clear, [this](VkCommandBuffer cmd) { map_->upload(cmd); })) return;
   float dpr = 1;
   {
     int fw, fh;
     glfwGetFramebufferSize(win_, &fw, &fh);
     dpr = ww ? float(fw) / float(ww) : 1.0f;
   }
-  map_->draw(vk_->cmd(), cam_, dpr, packs_);
+  map_->draw(vk_->cmd(), cam_, dpr);
   ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vk_->cmd());
 
   // scripted screenshot: wait until no tiles are missing or in flight and areas have loaded
-  const bool idle = need.empty() && loader_->in_flight() == 0 && area_req_.empty() && !fly_;
+  const bool idle = need.empty() && loader_->in_flight() == 0 && area_req_.empty() && !fly_ && !map_->labels_animating();
   settled_frames_ = idle ? settled_frames_ + 1 : 0;
   const bool shoot = !opt_.screenshot.empty() && (settled_frames_ > 8 || (opt_.max_frames && frames_ >= opt_.max_frames));
   if (shoot) {
@@ -461,12 +469,11 @@ void App::handle_input() {
 // ------------------------------------------------------------------ UI
 
 void App::ui() {
-  ui_labels();
   ui_top();
   if (panel_open_) ui_panel();
   ui_key();
   ui_status();
-  if (!hover_name_.empty() && !dragging_) {
+  if (!hover_name_.empty() && !dragging_ && opt_.screenshot.empty()) {
     ImGui::SetNextWindowBgAlpha(0.95f);
     ImGui::BeginTooltip();
     ImGui::TextUnformatted(hover_name_.c_str());
@@ -478,49 +485,15 @@ void App::ui() {
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
                      ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
     ImGui::TextUnformatted(toast_.c_str());
+    block_window();
     ImGui::End();
   }
 }
 
-void App::ui_labels() {
-  // Place and area labels on the map: provinces at country zoom, municipalities from z6,
-  // greedy declutter so no two overlap, and never under the panel or key.
-  auto* dl = ImGui::GetBackgroundDrawList();
-  struct Box {
-    float x0, y0, x1, y1;
-  };
-  std::vector<Box> boxes;
-  const float left = panel_width() + 10, right = float(cam_.w) - 270, top = 56, bottom = float(cam_.h) - 30;
-  auto labels = map_->labels();
-  std::sort(labels.begin(), labels.end(), [](const auto& a, const auto& b) { return a.level < b.level; });
-  std::set<std::string> done;
-  for (const auto& l : labels) {
-    const double a = std::clamp((cam_.zoom - (l.minz - 0.7)) / 0.7, 0.0, 1.0);
-    if (l.level == 1 && cam_.zoom > 8.5) continue;  // provinces give way to detail
-    if (a <= 0.05 || l.text.empty() || !done.insert(l.text).second) continue;
-    double sx, sy;
-    cam_.to_screen(l.wx, l.wy, sx, sy);
-    ImFont* f = l.level <= 1 ? font_title_ : font_ui_;
-    const float size = l.level <= 1 ? 15.0f : 12.5f;
-    const ImVec2 ts = f->CalcTextSizeA(size, FLT_MAX, 0, l.text.c_str());
-    const float x0 = float(sx) - ts.x / 2, y0 = float(sy) - ts.y / 2;
-    const Box b{x0 - 3, y0 - 2, x0 + ts.x + 3, y0 + ts.y + 2};
-    if (b.x0 < left || b.x1 > right || b.y0 < top || b.y1 > bottom) continue;
-    bool clash = false;
-    for (const auto& o : boxes)
-      if (b.x0 < o.x1 && b.x1 > o.x0 && b.y0 < o.y1 && b.y1 > o.y0) {
-        clash = true;
-        break;
-      }
-    if (clash) continue;
-    boxes.push_back(b);
-    const ImU32 halo = u32("#0b0f13", 0.92f * float(a));
-    const ImU32 ink = l.level <= 1 ? u32("#e6edf3", float(a)) : u32("#b8c2cc", float(a));
-    for (int dx = -1; dx <= 1; ++dx)
-      for (int dy = -1; dy <= 1; ++dy)
-        if (dx || dy) dl->AddText(f, size, ImVec2(x0 + float(dx), y0 + float(dy)), halo, l.text.c_str());
-    dl->AddText(f, size, ImVec2(x0, y0), ink, l.text.c_str());
-  }
+void App::block_window() {
+  // the map keeps its labels out of every interface window
+  const ImVec2 p = ImGui::GetWindowPos(), sz = ImGui::GetWindowSize();
+  blockers_.push_back({p.x - 4, p.y - 4, p.x + sz.x + 4, p.y + sz.y + 4});
 }
 
 void App::ui_top() {
@@ -539,6 +512,7 @@ void App::ui_top() {
     ImGui::PopStyleColor();
     ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(p.x + 12, p.y + 13), ImVec2(p.x + 22, p.y + 23), u32(ti.swatch), 3);
   }
+  block_window();
   ImGui::End();
   ImGui::PopStyleVar();
 
@@ -559,6 +533,7 @@ void App::ui_top() {
       ImGui::PopID();
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Escape)) topic_menu_ = false;
+    block_window();
     ImGui::End();
   }
 
@@ -579,6 +554,7 @@ void App::ui_top() {
                                               ImGuiInputTextFlags_EnterReturnsTrue);
   const bool active = ImGui::IsItemActive() || ImGui::IsItemFocused();
   ImGui::PopStyleVar(2);
+  block_window();
   ImGui::End();
   ImGui::PopStyleVar();
 
@@ -620,6 +596,7 @@ void App::ui_top() {
       ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + 38));
       ImGui::PopID();
     }
+    block_window();
     ImGui::End();
   } else if (enter && query_[0] && hits_.empty()) {
     toast_ = "Nothing found for that search";
@@ -631,6 +608,7 @@ void App::ui_top() {
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
   ImGui::Begin("##topr", nullptr, fl);
   if (ImGui::Button(panel_open_ ? "Hide panel" : "Panel", ImVec2(0, 36))) panel_open_ = !panel_open_;
+  block_window();
   ImGui::End();
   ImGui::PopStyleVar();
 }
@@ -646,6 +624,7 @@ void App::ui_panel() {
   if (stack_.size() > 1) {
     if (ImGui::SmallButton("< Back")) {
       stack_.pop_back();
+      block_window();
       ImGui::End();
       return;
     }
@@ -654,6 +633,7 @@ void App::ui_panel() {
   }
   if (page.kind == Page::TopicHome) ui_topic_home();
   else ui_area(page.id);
+  block_window();
   ImGui::End();
 }
 
@@ -881,6 +861,7 @@ void App::ui_key() {
       ImGui::TextColored(col(kInk2), "no data yet");
     }
   }
+  block_window();
   ImGui::End();
 }
 
@@ -914,6 +895,7 @@ void App::ui_status() {
   ImGui::SameLine(std::max(0.0f, float(cam_.w) - rw - 24));
   ImGui::TextColored(backend_error_.empty() ? col(kInk3) : col(kWarn), "%s", right.c_str());
   ImGui::PopFont();
+  block_window();
   ImGui::End();
   ImGui::PopStyleColor(2);
   ImGui::PopStyleVar(2);

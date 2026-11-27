@@ -9,7 +9,7 @@ release is personal and carries all data, plot values included.
 | 2 | Back-end: PMTiles, SQLite pack, `/v1` tiles, search, place tree, packs, versions, auth | 2 | first cut done (PR 1) |
 | 3 | Renderer core: Vulkan device, swapchain, MSAA, vector tiles, fills, lines, symbols, pan and zoom | 3 | first cut done (PR 1) |
 | 4 | UI shell: topics, search, panel and back stack, key, status bar | 2 | first cut done (PR 1) |
-| 5 | Text and labels: SDF glyph atlas in the map pass, collision, curved road labels, icons atlas | 3 | |
+| 5 | Text and labels: SDF glyph atlas in the map pass, collision, curved road labels, icons atlas | 3 | first cut done (PR 1): atlas, collision, fades, curved line labels, icons; road labels wait for road tiles |
 | 6 | Map quality: line joins and caps, dashes, hatching for no data, hover and selection outlines, raster tiles (hillshade, solar) | 2 | |
 | 7 | Real packs from the data store: admin with wards and suburbs, grid, parcels per province, places, h3; `export_tiles.py` and `export_pack.py` feeding `installed.json` | 2 | |
 | 8 | Plot level: parcel tiles z13-16, plot card from the SQLite pack, search by erf | 1.5 | |

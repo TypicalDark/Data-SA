@@ -323,7 +323,7 @@ void Context::destroy_swapchain() {
   swapchain_ = VK_NULL_HANDLE;
 }
 
-bool Context::begin_frame(const float clear[4]) {
+bool Context::begin_frame(const float clear[4], const std::function<void(VkCommandBuffer)>& before_pass) {
   int fw = 0, fh = 0;
   glfwGetFramebufferSize(win_, &fw, &fh);
   if (fw == 0 || fh == 0) return false;  // minimised
@@ -348,6 +348,7 @@ bool Context::begin_frame(const float clear[4]) {
   VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   check(vkBeginCommandBuffer(f.cmd, &bi), "vkBeginCommandBuffer");
+  if (before_pass) before_pass(f.cmd);
   VkClearValue cv{};
   std::memcpy(cv.color.float32, clear, sizeof(float) * 4);
   VkRenderPassBeginInfo rbi{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
