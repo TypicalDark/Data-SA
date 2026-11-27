@@ -9,7 +9,8 @@
     python gsa_load.py parcels  muni/WC053.geojsonl.gz [more files ...]
     python gsa_load.py valuation parcel_values.csv.gz
     python gsa_load.py kzn_values valuation/kzn_cogta/kzn_cogta_values.csv.gz
-    python gsa_load.py metro    parcels/gp_extra/JHB_metro.geojsonl.gz parcels/gp_extra/EKU_metro.geojsonl.gz
+    python gsa_load.py extras   parcels/gp_extra/JHB_metro.geojsonl.gz parcels/gp_extra/EKU_metro.geojsonl.gz \
+                                parcels/lim_extra/LIM354_*.geojsonl.gz parcels/nc_extra/NC091_*.geojsonl.gz
     python gsa_load.py grid     grid_nodes_v2.geojson grid_edges_v2.geojson
     python gsa_load.py climate  climate_wards_monthly.csv.gz [--vars rain_mm_imerg,t_mean_c]
     python gsa_load.py dams     dam_levels_current.csv
@@ -240,24 +241,29 @@ def cmd_valuation(db, a):
     n = db.copy_rows("v", ["sg21", "muni_code", "roll_period", "roll", "township", "erf", "portion", "scheme", "category", "usage",
                            "extent_m2", "market_value", "sale_price", "sale_date", "match_method", "area_check", "value_flag",
                            "source_url", "snapshot_ids"], rows())
-    # replaces only the roll rows it loaded; KZN COGTA and Joburg stand values come from their own loaders
-    db.x("DELETE FROM core.valuation WHERE muni_code = ANY(%s) AND coalesce(roll, '') NOT IN (%s, %s)", (sorted(munis), KZN_ROLL, JHB_ROLL))
+    # replaces only the roll rows it loaded; KZN COGTA and the cities' stand values come from their own loaders
+    db.x("DELETE FROM core.valuation WHERE muni_code = ANY(%s) AND roll IS DISTINCT FROM %s AND match_method IS DISTINCT FROM 'stand'",
+         (sorted(munis), KZN_ROLL))
     db.x("INSERT INTO core.valuation SELECT * FROM v")
     supersede(db)
     db.lineage("core.valuation", n, [p], "unit column never read (owner names in some rolls)"); print(f"  {n} valuation rows, {len(munis)} municipalities")
 
 # ------------------------------------------------------------------ value priority
-# A plot can be valued by more than one source. The municipal rolls (parcel_values) win; the KZN COGTA layer rows
-# for the same plot stay in the store (the plot card lists every source) but are flagged 'superseded', so roll-ups
-# and map values count each plot once. Same rule as the website's nat_tile.py and the app's build_parcels_pack.py.
-LOW_PRIORITY_ROLLS = ["KZN COGTA valuation layer"]
+# A plot can be valued by more than one source. Every row stays in the store (the plot card lists them all),
+# but only the best-ranked source counts in sums, medians and the map; the others are flagged 'superseded'.
+#   1  municipal valuation rolls (parcel_values: the roll documents themselves)
+#   2  values a city publishes on its own stands (Joburg GV2023, Polokwane; match_method 'stand')
+#   3  the KZN COGTA valuation layers
+def value_rank_sql():
+    return f"""CASE WHEN roll = '{KZN_ROLL}' THEN 3 WHEN match_method = 'stand' THEN 2 ELSE 1 END"""
 def supersede(db):
     db.x("UPDATE core.valuation SET value_flag = NULL WHERE value_flag = 'superseded'")
-    n = db.x("""UPDATE core.valuation v SET value_flag = 'superseded'
-                WHERE v.roll = ANY(%s) AND coalesce(v.value_flag, '') = '' AND v.sg21 IS NOT NULL
-                  AND EXISTS (SELECT 1 FROM core.valuation o WHERE o.sg21 = v.sg21 AND NOT (o.roll = ANY(%s))
-                              AND o.market_value IS NOT NULL AND coalesce(o.value_flag, '') NOT IN ('zero', 'superseded'))""",
-             (LOW_PRIORITY_ROLLS, LOW_PRIORITY_ROLLS))
+    n = db.x(f"""WITH r AS (SELECT id, sg21, {value_rank_sql()} AS rk FROM core.valuation
+                            WHERE sg21 IS NOT NULL AND market_value IS NOT NULL AND coalesce(value_flag, '') NOT IN ('zero')),
+                  best AS (SELECT sg21, min(rk) rk FROM r GROUP BY sg21 HAVING count(DISTINCT rk) > 1)
+                 UPDATE core.valuation v SET value_flag = 'superseded'
+                 FROM r JOIN best b USING (sg21)
+                 WHERE v.id = r.id AND r.rk > b.rk AND coalesce(v.value_flag, '') = ''""")
     print(f"  {n} lower-priority value rows flagged superseded")
 
 # ------------------------------------------------------------------ KZN COGTA valuation layers
@@ -285,56 +291,73 @@ def cmd_kzn_values(db, a):
     db.lineage("core.valuation[kzn_cogta]", n, [p], "unit column never read; owner and ID fields never fetched")
     print(f"  {n} KZN COGTA rows")
 
-# ------------------------------------------------------------------ metro stands (parcels/gp_extra: Joburg, Ekurhuleni)
+# ------------------------------------------------------------------ municipal extras (parcels/*_extra)
+# Cities' own cadastres, newer or richer than the 2022 SG copy: Joburg and Ekurhuleni stands (gp_extra),
+# Polokwane erven and roll farm portions (lim_extra), Sol Plaatje (nc_extra). Same rules as the website's
+# nat_tile.py: an extra parcel replaces the SG parcel with the same sg21, and an SG parcel whose centre falls
+# inside an extra parcel with another code is marked superseded_by (kept, not drawn). Extra parcels without
+# an SG code get a stable synthetic key 'X' + 20 hex of md5(muni, geometry), so they can still be looked up.
 JHB_ROLL, JHB_URL = "JHB GV2023", "https://ags.joburg.org.za/server/rest/services/Property/MapServer"
-def cmd_metro(db, a):
-    """parcels/gp_extra/{JHB,EKU}_metro.geojsonl.gz: the metros' own stands, newer than the 2022 SG copy.
-    A stand replaces the SG parcel with the same sg21; an SG parcel whose centre falls inside a stand with another
-    sg21 is marked superseded_by (kept, not drawn). Joburg stands carry GV2023 values, written to core.valuation."""
+def cmd_extras(db, a):
     for p in a.files:
-        name = os.path.basename(p).split("_")[0]          # JHB / EKU
-        stage_features(db, "metro", [p])
-        db.x("ALTER TABLE stage.metro ADD COLUMN sg21 char(21), ADD COLUMN g geometry")
-        db.x("""UPDATE stage.metro SET sg21 = CASE WHEN length(props->>'sg21') = 21 THEN props->>'sg21' END,
+        stage_features(db, "extra", [p])
+        db.x("ALTER TABLE stage.extra ADD COLUMN sg21 char(21), ADD COLUMN g geometry, ADD COLUMN muni text")
+        db.x("""UPDATE stage.extra SET muni = props->>'muni',
+                       sg21 = CASE WHEN length(props->>'sg21') = 21 THEN props->>'sg21'
+                                   ELSE 'X' || upper(left(md5(coalesce(props->>'muni','') || gj), 20)) END,
                        g = ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON(gj),4326)),3))
                 WHERE gj IS NOT NULL""")
-        db.x("CREATE INDEX ON stage.metro (sg21)")
+        db.x("CREATE INDEX ON stage.extra (sg21)"); db.x("ANALYZE stage.extra")
+        # the file's municipality is its name prefix (LIM354_polokwane_gis); a few edge rows carry a neighbour's code
+        name = os.path.basename(p).split("_")[0]
+        src = db.q("SELECT min(props->>'src') FROM stage.extra")[0][0]
         snap = db.snap_ids(p)
-        # stands that share an sg21 (township remainders) become one plot
-        n = db.x("""INSERT INTO core.parcel (sg21, kind, lstatus, town, parcel_no, stand, area_m2, muni_id, geom, src, snapshot_ids)
-                    SELECT sg21, min(props->>'type'), min(coalesce(props->>'status', props->>'erf_status')),
-                           min(coalesce(props->>'township', props->>'suburb')), min(props->>'erf'), min(props->>'stand'),
-                           sum((props->>'area_m2')::float), %s, ST_Multi(ST_Union(g)), min(props->>'src'), %s
-                    FROM stage.metro WHERE sg21 IS NOT NULL AND g IS NOT NULL AND NOT ST_IsEmpty(g) GROUP BY sg21
+        # parcels sharing an sg21 (township remainders) become one plot
+        n = db.x("""INSERT INTO core.parcel (sg21, kind, lstatus, town, parcel_no, portion_no, farm_name, stand, area_m2, muni_id,
+                                             geom, src, snapshot_ids)
+                    SELECT sg21, min(props->>'type'), min(coalesce(props->>'status', props->>'erf_status', props->>'survey_status')),
+                           min(coalesce(props->>'township', props->>'town', props->>'suburb')), min(coalesce(props->>'erf', props->>'parcel')),
+                           min(nullif(props->>'portion', '0')), min(props->>'farm_name'), min(props->>'stand'),
+                           sum((props->>'area_m2')::float), (SELECT area_id FROM core.admin_area WHERE area_id = min(muni)),
+                           ST_Multi(ST_Union(g)), min(props->>'src'), %s
+                    FROM stage.extra WHERE g IS NOT NULL AND NOT ST_IsEmpty(g) GROUP BY sg21
                     ON CONFLICT (sg21) DO UPDATE SET kind = coalesce(EXCLUDED.kind, parcel.kind), lstatus = EXCLUDED.lstatus,
                          town = coalesce(EXCLUDED.town, parcel.town), parcel_no = coalesce(parcel.parcel_no, EXCLUDED.parcel_no),
-                         stand = EXCLUDED.stand, area_m2 = EXCLUDED.area_m2, muni_id = EXCLUDED.muni_id, geom = EXCLUDED.geom,
-                         src = EXCLUDED.src, snapshot_ids = EXCLUDED.snapshot_ids, superseded_by = NULL,
-                         ward_id = NULL, suburb_id = NULL, h3_r9 = NULL, quadkey_z16 = NULL""", (name, snap))
-        db.commit(); print(f"  {name}: {n} stands written")
-        # older SG parcels in the same metro whose centre lies inside a stand with another code
-        db.x("UPDATE core.parcel SET superseded_by = NULL WHERE muni_id = %s AND superseded_by IS NOT NULL", (name,))
-        # one index probe per older parcel (a join here plans as a nested loop over both sets)
-        src = db.q("SELECT min(props->>'src') FROM stage.metro")[0][0]
+                         farm_name = coalesce(EXCLUDED.farm_name, parcel.farm_name),
+                         stand = EXCLUDED.stand, area_m2 = coalesce(EXCLUDED.area_m2, parcel.area_m2), muni_id = EXCLUDED.muni_id,
+                         geom = EXCLUDED.geom, src = EXCLUDED.src, snapshot_ids = EXCLUDED.snapshot_ids, superseded_by = NULL,
+                         ward_id = NULL, suburb_id = NULL, h3_r9 = NULL, quadkey_z16 = NULL""", (snap,))
+        db.commit(); print(f"  {name} ({os.path.basename(p)}): {n} parcels written")
+        # older parcels in the same municipality whose centre lies inside one of these (one index probe each;
+        # a join here plans as a nested loop over both sets)
+        db.x("UPDATE core.parcel SET superseded_by = NULL WHERE superseded_by IN (SELECT sg21 FROM core.parcel WHERE src = %s)", (src,))
         m = db.x("""UPDATE core.parcel o SET superseded_by = x.s
                     FROM (SELECT o2.sg21, (SELECT s.sg21 FROM core.parcel s
                                            WHERE ST_Intersects(s.geom, ST_PointOnSurface(o2.geom)) AND s.src = %s AND s.sg21 <> o2.sg21
+                                             -- same plot, split or merged; not an erf that merely lies on a big farm portion
+                                             AND ST_Area(o2.geom) >= 0.1 * ST_Area(s.geom)
                                            LIMIT 1) AS s
-                          FROM core.parcel o2 WHERE o2.muni_id = %s AND o2.src IS DISTINCT FROM %s) x
+                          FROM core.parcel o2 WHERE o2.muni_id = %s AND coalesce(o2.src, '') NOT LIKE 'City of%%' AND o2.src IS DISTINCT FROM %s) x
                     WHERE o.sg21 = x.sg21 AND x.s IS NOT NULL""", (src, name, src))
-        db.commit(); print(f"  {name}: {m} older SG parcels superseded by newer stands")
-        if name == "JHB":
-            db.x("DELETE FROM core.valuation WHERE roll = %s", (JHB_ROLL,))
-            v = db.x("""INSERT INTO core.valuation (sg21, muni_code, roll_period, roll, township, erf, address, category, extent_m2,
-                                                    market_value, sale_price, sale_date, match_method, source_url, snapshot_ids, zoning, ext_ref)
-                        SELECT sg21, 'JHB', '2023-07-01', %s, props->>'township', props->>'stand', props->>'address', props->>'roll_category',
-                               (props->>'area_m2')::float, round((props->>'market_value')::numeric), round((props->>'last_sale_price')::numeric),
-                               CASE WHEN props->>'last_sale_date' ~ '^\\d{4}-\\d{2}-\\d{2}' THEN left(props->>'last_sale_date', 10)::date END,
-                               'stand', %s, %s, props->>'zoning', props->>'property_id'
-                        FROM stage.metro WHERE sg21 IS NOT NULL AND (props ? 'market_value' OR props ? 'last_sale_price')""",
-                     (JHB_ROLL, JHB_URL, snap))
-            print(f"  JHB: {v} GV2023 value rows")
-        db.lineage(f"core.parcel[{name} metro]", n, [p], f"{m} SG parcels superseded")
+        db.commit(); print(f"  {name}: {m} older SG parcels superseded")
+        # the city's own values on its parcels (Joburg GV2023, Polokwane roll farm portions); owner fields never exist here
+        roll = JHB_ROLL if name == "JHB" else src
+        url = JHB_URL if name == "JHB" else None
+        db.x("DELETE FROM core.valuation WHERE match_method = 'stand' AND roll = %s", (roll,))
+        v = db.x(r"""INSERT INTO core.valuation (sg21, muni_code, roll_period, roll, township, erf, address, category, usage, extent_m2,
+                                                market_value, sale_price, sale_date, match_method, source_url, snapshot_ids, zoning, ext_ref)
+                    SELECT sg21, muni, coalesce(left(props->>'value_date', 10), props->>'roll'), %s,
+                           coalesce(props->>'township', props->>'town'), coalesce(props->>'stand', props->>'erf', props->>'parcel'),
+                           coalesce(props->>'address', props->>'street'), coalesce(props->>'roll_category', props->>'rating_category'),
+                           props->>'land_use', (props->>'area_m2')::float,
+                           round(coalesce(props->>'market_value', props->>'value_zar')::numeric), round((props->>'last_sale_price')::numeric),
+                           CASE WHEN props->>'last_sale_date' ~ '^\d{4}-\d{2}-\d{2}' THEN left(props->>'last_sale_date', 10)::date END,
+                           'stand', %s, %s, props->>'zoning', props->>'property_id'
+                    FROM stage.extra
+                    WHERE props ?| array['market_value', 'value_zar', 'last_sale_price', 'rating_category', 'roll_category', 'zoning']""",
+                 (roll, url, snap))
+        print(f"  {name}: {v} value / zoning rows from the city")
+        db.lineage(f"core.parcel[{name} extra]", n, [p], f"{m} SG parcels superseded")
         db.commit()
     supersede(db)
 
@@ -416,7 +439,7 @@ def cmd_dams(db, a):
     db.lineage("core.place[dam]+ts.value[dam]", len(rows), [p]); print(f"  {len(rows)} dams")
 
 CMDS = {"sources": cmd_sources, "admin": cmd_admin, "suburbs": cmd_suburbs, "population": cmd_population, "parcels": cmd_parcels,
-        "valuation": cmd_valuation, "kzn_values": cmd_kzn_values, "metro": cmd_metro, "grid": cmd_grid, "climate": cmd_climate, "dams": cmd_dams}
+        "valuation": cmd_valuation, "kzn_values": cmd_kzn_values, "extras": cmd_extras, "metro": cmd_extras, "grid": cmd_grid, "climate": cmd_climate, "dams": cmd_dams}
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)

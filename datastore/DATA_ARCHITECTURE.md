@@ -232,7 +232,7 @@ map can be traced to the raw file it came from.
 |---|---|---|
 | Archive | `archive/gsa_archive.py` (wraps `archive/fetch_all.py`) | tested |
 | Schema | `schema/001_core.sql`, `schema/002_metro_values.sql` (stands, superseded plots, value priority) | tested |
-| Load | `etl/gsa_load.py sources, admin, suburbs, population, parcels, valuation, kzn_values, metro, grid, climate, dams` | national run |
+| Load | `etl/gsa_load.py sources, admin, suburbs, population, parcels, valuation, kzn_values, extras, grid, climate, dams` | national run |
 | Tree, keys, roll-ups, H3, search | `etl/build_tree.sql` | tested |
 | Tiles | `export/export_tiles.py` (tippecanoe per zoom band + tile-join; packs admin, grid, parcels-<prov>, h3, places) | national run |
 | Attribute packs | `export/export_pack.py` (SQLite, FTS5 search, packed time series; national `pack` + `pack-<prov>` plot packs) | national run |
@@ -348,7 +348,7 @@ host refuses binary files, so its data ships as JSON/base64 bundles uploaded as 
 pipeline notes). `export/export_web.py` writes the website's national plot bundles (`natp`) from the
 same PostGIS tables as the app's packs, in the format of the site's `scripts/nat_tile.py`
 (`bundles/<z>_<x>_<y>.js` + `manifest_local.json`, then the site's `natp_manifest.py`). A roll fix or a
-newer metro copy loaded into the store now reaches the app and the website from one run. Uploading the
+newer city cadastre loaded into the store now reaches the app and the website from one run. Uploading the
 bundles and swapping the site's manifest stays with the map thread, because replacing assets in the
 store needs your OK. The other website layers still come from the site's own scripts; they move to the
 store loader by loader (the list in section 6).
@@ -357,12 +357,15 @@ store loader by loader (the list in section 6).
 
 - **Several sources per plot.** Municipal rolls (`parcel_values`), the KZN COGTA layers and Joburg's
   GV2023 stand values are all kept in `core.valuation`, each row citing its source. Where a municipal
-  roll values a plot, the KZN COGTA row for it is flagged `superseded`: the plot card still lists it,
-  but sums, medians and the map count the roll value only (`core.valuation_live`). Same rule as the
-  website and the app's pack builder.
-- **Newer metro stands.** Joburg and Ekurhuleni stands (`parcels/gp_extra`) replace the 2022 SG parcel
-  with the same SG code. An SG parcel whose centre falls inside a stand with another code (stands get
-  split and merged) gets `superseded_by`; it stays in the store and on the plot card, but exports draw
+  roll values a plot, the city's own value and the KZN COGTA row for it are flagged `superseded`
+  (rank: roll documents, then city values, then KZN COGTA): the plot card still lists them, but sums,
+  medians and the map count the best-ranked source only (`core.valuation_live`).
+- **Newer city cadastres** (`gsa_load.py extras`): Joburg and Ekurhuleni stands (`parcels/gp_extra`),
+  Polokwane erven and roll farm portions (`lim_extra`) and Sol Plaatje (`nc_extra`) replace the 2022 SG
+  parcel with the same SG code. An SG parcel whose centre falls inside a city parcel with another code,
+  and which covers at least a tenth of that parcel's area (a split or merged plot, not an erf lying on a
+  big farm portion), gets `superseded_by`. City parcels without an SG code get a stable key `X` + 20 hex.
+  A superseded parcel stays in the store and on the plot card, but exports draw
   the stand only (`core.parcel_live`).
 - **Province packs.** `export_pack.py` writes the national `pack.sqlite` (tree, metrics, grid, series,
   sources, search without plots) and one `pack-<prov>.sqlite` per province (plots, their values, plot

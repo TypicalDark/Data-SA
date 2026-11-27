@@ -1,8 +1,8 @@
--- Grid of SA data store, migration 2: newer metro stands and extra value sources.
+-- Grid of SA data store, migration 2: newer city cadastres (stands) and extra value sources.
 -- Apply after 001_core.sql:  psql -d gsa -f schema/002_metro_values.sql      (idempotent)
 --
 -- core.parcel.stand          the city's own stand label (Joburg "RE/54/239-IQ"); shown instead of "Erf n ptn m"
--- core.parcel.superseded_by  set on an older SG parcel whose centre lies inside a newer metro stand with another
+-- core.parcel.superseded_by  set on an older SG parcel whose centre lies inside a newer city parcel with another
 --                            SG code (stands are split and merged after the 2022 SG copy). The row is kept, never
 --                            deleted; exports leave superseded parcels out so the map shows each plot once.
 -- core.valuation.zoning      zoning from rolls that print it (Joburg GV2023)

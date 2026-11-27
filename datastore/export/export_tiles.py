@@ -57,7 +57,7 @@ LAYERS = [
         'address',v.address,'zoning',v.zoning)), p.geom, 12, 14
    FROM core.parcel_live p LEFT JOIN LATERAL (
         SELECT sum(market_value) value, max(category) cat, max(usage) use, max(sale_price) sale, max(sale_date)::text sale_date,
-               max(concat_ws(' ', CASE WHEN roll IN ('general','supplementary') THEN muni_code || ' ' || roll ELSE roll END, roll_period)) roll, count(*) units,
+               max(concat_ws(' ', CASE WHEN roll IN ('general','supplementary') THEN muni_code || ' ' || roll ELSE roll END, roll_period)) roll, count(market_value) units,
                min(address) address, min(zoning) zoning
         FROM core.valuation_live WHERE sg21=p.sg21) v ON true {split}""", ["--no-feature-limit", "--no-tile-size-limit"]),
  ("hex", "h3", """SELECT h.h3::text || ':' || h.metric, jsonb_build_object('h3',h.h3::text,'res',h.res,'metric',h.metric,'v',round(h.v::numeric),'n',h.n),

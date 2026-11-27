@@ -22,7 +22,7 @@ $L population "$DATA/population/wards_population.csv"
 $L parcels    "$DATA"/parcels/muni/*.geojsonl.gz "$DATA"/parcels/kzn/*.geojsonl.gz
 $L valuation  "$DATA/parcels/parcel_values.csv.gz"
 $L kzn_values "$DATA/valuation/kzn_cogta/kzn_cogta_values.csv.gz"
-$L metro      "$DATA/parcels/gp_extra/JHB_metro.geojsonl.gz" "$DATA/parcels/gp_extra/EKU_metro.geojsonl.gz"
+$L extras     "$DATA"/parcels/gp_extra/*_metro.geojsonl.gz "$DATA"/parcels/lim_extra/LIM354_*.geojsonl.gz "$DATA"/parcels/nc_extra/NC091_*.geojsonl.gz
 $L grid       "$DATA/network/v2/grid_nodes_v2.geojson" "$DATA/network/v2/grid_edges_v2.geojson"
 $L climate    "$DATA/climate/climate_wards_monthly.csv.gz"
 $L dams       "$DATA/dams/dam_levels_current.csv"
