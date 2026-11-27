@@ -76,18 +76,23 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
       const std::string id = p["id"];
       const std::string type = p.value("tile_type", "");
       // vector packs, and image packs ("raster-...") as PNG
-      if (type != "mvt" && !(type == "png" && is_raster_pack(id))) continue;
+      if (type != "mvt" && !(type == "png" && is_raster_pack(id)) && id != "buildings") continue;
+      // plots draw from 12.5 as on the website, buildings from 13
       pack_ids.push_back(id);
-      if (id == "admin" || id == "grid" || id.rfind("web-", 0) == 0 || is_raster_pack(id))
-        all_packs_.push_back({id, p.value("minzoom", 0), p.value("maxzoom", 14)});
+      if (id == "admin" || id == "base" || id == "buildings" || id == "parcels" || id == "grid" || id.rfind("web-", 0) == 0 ||
+          is_raster_pack(id))
+        all_packs_.push_back({id, p.value("minzoom", 0), p.value("maxzoom", 14),
+                              id == "buildings" ? 13.0 : id == "parcels" ? 12.5 : 0.0});
       auto& names = pack_layers_[id];
       for (const auto& l : p.value("layers", json::array())) {
         if (l.is_string()) names.push_back(l.get<std::string>());
         else if (l.is_object() && l.contains("id")) names.push_back(l["id"].get<std::string>());
       }
     }
-    // draw order: municipalities at the bottom, website layers, then the grid on top
-    auto rank = [](const std::string& id) { return id == "admin" ? 0 : id == "grid" ? 2 : 1; };
+    // draw order: municipalities at the bottom, the base map, buildings, website layers, then the grid
+    auto rank = [](const std::string& id) {
+      return id == "admin" ? 0 : id == "base" ? 1 : id == "buildings" ? 2 : id == "grid" ? 4 : 3;
+    };
     std::sort(all_packs_.begin(), all_packs_.end(),
               [&](const auto& a, const auto& b) { return rank(a.pack) != rank(b.pack) ? rank(a.pack) < rank(b.pack) : a.pack < b.pack; });
   }
@@ -96,8 +101,29 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
 
   const auto& sd = settings_->data();
   side_open_ = sd.value("side_open", true);
-  if (opt_.screenshot.empty()) {
+  if (opt_.screenshot.empty() || !opt_.settings_path.empty()) {  // screenshots read an explicit settings file
     rules_ = find::rules_from(sd.value("find_rules", json::array()));
+    if (sd.contains("base") && sd["base"].is_object()) {
+      const auto& b = sd["base"];
+      lstate_.roads = b.value("roads", lstate_.roads);
+      lstate_.terrain = b.value("terrain", lstate_.terrain);
+      lstate_.names = b.value("names", lstate_.names);
+      lstate_.buildings = b.value("buildings", lstate_.buildings);
+      lstate_.landmarks = b.value("landmarks", lstate_.landmarks);
+    }
+    if (sd.contains("filter") && sd["filter"].is_object()) {
+      const auto& j = sd["filter"];
+      try {
+        filter_.volt = j.value("volt", std::set<int>{});
+        filter_.fuel = j.value("fuel", std::set<std::string>{});
+        filter_.party = j.value("party", std::set<std::string>{});
+        filter_.turn = j.value("turn", std::set<int>{});
+        filter_.prov = j.value("prov", std::set<std::string>{});
+        filter_.hide = j.value("hide", false);
+      } catch (const std::exception&) {
+        filter_ = {};
+      }
+    }
     rank_key_ = sd.value("rank", rank_key_);
   }
   if (opt_.screenshot.empty() && sd.contains("topic")) set_topic(sd.value("topic", "start"));
@@ -111,9 +137,24 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
     cam_.cy = geo::my(*opt_.lat);
   }
   if (opt_.zoom) cam_.zoom = *opt_.zoom;
+  if (opt_.pitch) cam_.pitch = pitch_target_ = std::clamp(*opt_.pitch, 0.0, geo::kMaxPitch);
   if (!opt_.lon) cam_.cx -= side_width() / 2 / cam_.scale();  // centre the country in the free map area
   if (!opt_.select.empty()) open_area(opt_.select, !opt_.lon);
   if (opt_.spot) open_spot(opt_.spot->first, opt_.spot->second);
+  if (const auto colon = opt_.measure.find(':'); colon != std::string::npos) {
+    const std::string mode = opt_.measure.substr(0, colon);
+    measure_mode_ = mode == "area" ? measure::Mode::Area : mode == "circle" ? measure::Mode::Circle : measure::Mode::Path;
+    std::vector<double> v;
+    std::string rest = opt_.measure.substr(colon + 1);
+    for (size_t at = 0; at < rest.size();) {
+      const size_t comma = rest.find(',', at);
+      v.push_back(std::atof(rest.substr(at, comma - at).c_str()));
+      at = comma == std::string::npos ? rest.size() : comma + 1;
+    }
+    open_panel(Panel::Measure);
+    for (size_t i = 0; i + 1 < v.size(); i += 2) measure_.push_back({geo::mx(v[i]), geo::my(v[i + 1])});
+    measure_done_ = measure_.size() >= 2;
+  }
   if (!opt_.panel.empty()) {
     const std::string p = opt_.panel;
     if (p == "rank") {
@@ -121,6 +162,7 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
       open_panel(Panel::Find);
     } else if (p == "find") open_panel(Panel::Find);
     else if (p == "list") open_panel(Panel::List);
+    else if (p == "filter") open_panel(Panel::Filter);
     else if (p == "areas") open_panel(Panel::Areas);
     else if (p == "views") open_panel(Panel::Views);
     else if (p == "watch") open_panel(Panel::Watch);
@@ -267,6 +309,11 @@ void App::frame() {
     cam_.zoom = fly_->from.zoom + (fly_->zoom - fly_->from.zoom) * e;
     if (k >= 1) fly_.reset();
   }
+  if (cam_.pitch != pitch_target_) {
+    const double step = std::clamp(ImGui::GetIO().DeltaTime * 160.0, 0.5, 20.0);
+    cam_.pitch = std::abs(pitch_target_ - cam_.pitch) <= step ? pitch_target_
+                                                                : cam_.pitch + (pitch_target_ > cam_.pitch ? step : -step);
+  }
 
   for (auto& t : loader_->take()) map_->add(t);
   auto need = map_->needed(cam_, packs_);
@@ -360,6 +407,7 @@ void App::poll_async() {
       try {
         fdata_ = find::parse(*j);
         set_rules(rules_);
+        set_filter(filter_);  // provinces need the municipality list
         if (!find_toast_.empty()) toast(find_toast_ + ": " + std::to_string(fpass_.size()) + " municipalities match");
         find_toast_.clear();
       } catch (const std::exception& e) {
@@ -442,6 +490,10 @@ layers::MapStyle App::map_style_now() const {
   auto ms = layers::map_style(lstate_);
   ms.find_on = fdata_ && !rules_.empty();
   if (ms.find_on) ms.find_pass = fpass_;
+  ms.filter = filter_;
+  ms.extrude = cam_.pitch > 5;  // buildings stand up once the map is tilted, as on the website
+  // ward filters: municipal winners under the wards would show through where wards are hidden
+  if (filter_.vote_on() && lstate_.shows("c:ward") && !lstate_.shows("c:muni")) ms.fill = style::Topic::Overview;
   return ms;
 }
 
@@ -454,13 +506,35 @@ void App::set_rules(std::vector<find::Rule> r) {
   }
 }
 
+void App::set_filter(const layers::Filters& f) {
+  filter_ = f;
+  filter_.prov_munis.clear();
+  if (fdata_)
+    for (const auto& m : fdata_->munis) {
+      // the Find data uses KZN, EC, LP, GT, WC, NW, MP, FS, NC; the website's filter says LIM
+      const std::string p = m.prov == "LP" ? "LIM" : m.prov;
+      if (filter_.prov.count(p)) filter_.prov_munis.insert(m.code);
+    }
+  if (opt_.screenshot.empty()) {
+    auto& j = settings_->data()["filter"];
+    j = json{{"volt", filter_.volt}, {"fuel", filter_.fuel}, {"party", filter_.party},
+             {"turn", filter_.turn}, {"prov", filter_.prov}, {"hide", filter_.hide}};
+    settings_->save();
+  }
+}
+
 void App::apply_layers() {
   map_->set_style(map_style_now());
   // only fetch the website packs whose layers are on
   const auto want = layers::packs_needed(lstate_, pack_layers_);
   packs_.clear();
-  for (const auto& p : all_packs_)
-    if ((p.pack.rfind("web-", 0) != 0 && !is_raster_pack(p.pack)) || want.count(p.pack)) packs_.push_back(p);
+  const bool base = lstate_.roads || lstate_.landmarks || lstate_.names;
+  for (const auto& p : all_packs_) {
+    if (p.pack == "base" && !base) continue;
+    if (p.pack == "buildings" && !lstate_.buildings) continue;
+    const bool on_demand = p.pack.rfind("web-", 0) == 0 || is_raster_pack(p.pack) || p.pack == "parcels";
+    if (!on_demand || want.count(p.pack)) packs_.push_back(p);
+  }
 }
 
 void App::open_area(const std::string& id, bool fly) {
@@ -535,9 +609,36 @@ void App::open_panel(Panel p) {
   panel_ = panel_ == p ? Panel::None : p;
   if (p == Panel::Measure) {
     measuring_ = panel_ == Panel::Measure;
-    if (measuring_) measure_.clear();
+    if (measuring_) measure_reset();
   }
   side_open_ = true;
+}
+
+std::vector<measure::LonLat> App::measure_ll() const {
+  std::vector<measure::LonLat> out;
+  for (const auto& [wx, wy] : measure_) out.push_back({geo::lon_of(wx), geo::lat_of(wy)});
+  return out;
+}
+
+void App::measure_click(double sx, double sy, double wx, double wy) {
+  using measure::Mode;
+  if (measure_done_) measure_reset();
+  // clicking an own point: the first closes an area, the last finishes a path
+  for (size_t i = 0; i < measure_.size(); ++i) {
+    double px, py;
+    cam_.to_screen(measure_[i].first, measure_[i].second, px, py);
+    if (std::hypot(px - sx, py - sy) >= 10) continue;
+    if (measure_mode_ == Mode::Area && i == 0 && measure_.size() >= 3) {
+      measure_done_ = true;
+      return;
+    }
+    if (measure_mode_ != Mode::Circle && i + 1 == measure_.size() && measure_.size() >= 2) {
+      measure_done_ = true;
+      return;
+    }
+  }
+  measure_.push_back({wx, wy});
+  if (measure_mode_ == Mode::Circle && measure_.size() == 2) measure_done_ = true;
 }
 
 void App::close_top() {
@@ -692,6 +793,8 @@ void App::save_settings() {
   auto& d = settings_->data();
   d["side_open"] = side_open_;
   d["topic"] = lstate_.topic;
+  d["base"] = json{{"roads", lstate_.roads}, {"terrain", lstate_.terrain}, {"names", lstate_.names},
+                   {"buildings", lstate_.buildings}, {"landmarks", lstate_.landmarks}};
   settings_->save();
 }
 
@@ -728,7 +831,7 @@ void App::run_fn(const std::string& code) {
   } else if (code == "MEAS") {
     measuring_ = true;
     panel_ = Panel::Measure;
-    measure_.clear();
+    measure_reset();
     if (has_pos) measure_.push_back({geo::mx(lon), geo::my(lat)});
   } else if (code == "WATCH") {
     watch_current();
@@ -829,6 +932,10 @@ bool App::run_command(const std::string& line) {
     find_rank_ = true;
     panel_ = Panel::Find;
     side_open_ = true;
+  } else if (c == "FILTER") {
+    panel_ = Panel::Filter;
+    side_open_ = true;
+    filter_vote_tab_ = a == "vote" || a == "party" || (a.empty() && lstate_.topic == "vote");
   } else if (c == "LIST") {
     panel_ = Panel::List;
     side_open_ = true;
@@ -905,7 +1012,11 @@ void App::handle_input() {
         if (std::hypot(m.x - io.MouseClickedPos[0].x, m.y - io.MouseClickedPos[0].y) > 3) drag_moved_ = true;
         if (drag_moved_) {
           fly_.reset();
-          cam_.pan_px(dx, dy);
+          if (io.KeyCtrl) {  // Ctrl+drag tilts the map
+            cam_.pitch = pitch_target_ = std::clamp(cam_.pitch - dy * 0.3, 0.0, geo::kMaxPitch);
+          } else {
+            cam_.pan_px(dx, dy);
+          }
         }
       }
       drag_x_ = m.x;
@@ -916,7 +1027,7 @@ void App::handle_input() {
         double wx, wy;
         cam_.to_world(m.x, m.y, wx, wy);
         if (measuring_) {
-          measure_.push_back({wx, wy});
+          measure_click(m.x, m.y, wx, wy);
         } else if (const auto* r = map_->pick_icon(m.x, m.y)) {
           open_facility(*r);
         } else if (const auto h = map_->pick_web(m.x, m.y, cam_)) {
@@ -951,12 +1062,19 @@ void App::handle_input() {
     if (ImGui::IsKeyPressed(ImGuiKey_W, false) && shift) open_panel(Panel::Watch);
     if (ImGui::IsKeyPressed(ImGuiKey_KeypadMultiply, false) || (shift && ImGui::IsKeyPressed(ImGuiKey_8, false))) watch_current();
     if (ImGui::IsKeyPressed(ImGuiKey_F2, false)) catalogue_open_ = !catalogue_open_;
+    if (measuring_ && (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) &&
+        measure_.size() >= 2)
+      measure_done_ = true;
+    if (ImGui::IsKeyPressed(ImGuiKey_F3, false)) open_panel(Panel::Filter);
     if (ImGui::IsKeyPressed(ImGuiKey_F4, false)) open_panel(Panel::List);
     if (ImGui::IsKeyPressed(ImGuiKey_F6, false)) open_panel(Panel::Views);
     if (ImGui::IsKeyPressed(ImGuiKey_F7, false)) open_panel(Panel::Measure);
     if (ImGui::IsKeyPressed(ImGuiKey_F1, false)) open_panel(Panel::Keys);
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
-      if (measuring_ && ImGui::IsKeyPressed(ImGuiKey_Backspace, false) && !measure_.empty()) measure_.pop_back();
+      if (measuring_ && ImGui::IsKeyPressed(ImGuiKey_Backspace, false) && !measure_.empty()) {
+        measure_.pop_back();
+        measure_done_ = false;
+      }
       else close_top();
     }
     const double step = 120;

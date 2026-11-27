@@ -16,8 +16,9 @@ struct Vertex {
   float ex, ey;  // screen-pixel extrusion
   uint32_t rgba;
   float minz;
+  float h = 0;   // height above the ground in metres (extruded buildings in 3D)
 };
-static_assert(sizeof(Vertex) == 24);
+static_assert(sizeof(Vertex) == 28);
 
 struct Mesh {
   std::vector<Vertex> fill;     // area fills
@@ -34,7 +35,8 @@ struct Label {
 };
 
 // Appends geometry of one tile to `out`. `pack` is the tile pack id ("admin", "grid").
-void build(const std::string& pack, const mvt::Tile& tile, const layers::MapStyle& ms, Mesh& out);
+// `z` is the tile zoom the data comes from (the base map switches from overview to regional data at 10).
+void build(const std::string& pack, const mvt::Tile& tile, const layers::MapStyle& ms, Mesh& out, int z = 0);
 
 // Label points of an admin tile, in world units. tile_ox/oy/size place the tile in the world.
 void labels(const mvt::Tile& tile, double tile_ox, double tile_oy, double tile_size, std::vector<Label>& out);

@@ -21,6 +21,7 @@ namespace gsa {
 struct PackZoom {
   std::string pack;
   int minzoom = 0, maxzoom = 14;
+  double show_from = 0;  // no tiles are fetched or drawn below this zoom (buildings: 13)
 };
 
 class MapRenderer {

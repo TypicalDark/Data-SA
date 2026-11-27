@@ -22,6 +22,7 @@ const std::vector<Spec>& all() {
       {"PLOTS", "", "Topic: property", true},
       {"FIND", "preset", "Find places where... (conditions across layers)", true},
       {"RANK", "", "Rank what is in view", true},
+      {"FILTER", "", "Filters: line voltage, fuel, ward party, turnout, province", true},
       {"LIST", "", "List what is in view for the colour layer", true},
       {"AREAS", "", "Provinces and municipalities", true},
       {"DES", "", "Describe the open subject (the full card)", true},

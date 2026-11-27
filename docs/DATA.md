@@ -10,10 +10,13 @@ exports: a release folder made by `datastore/export/build_packs.py`.
 |---|---|---|---|
 | `admin` | PMTiles, MVT | `export_tiles.py --pack admin` | province, district, municipality, ward, suburb, label |
 | `grid` | PMTiles, MVT | `export_tiles.py --pack grid` | line, facility |
-| `parcels-<prov>` (`parcels-wc`, `parcels-gt`, ...) | PMTiles, MVT | `export_tiles.py --pack parcels` | parcel, z13-16, one pack per province (`region` in installed.json) |
+| `parcels` | PMTiles, MVT | `tools/webpack/build_parcels_pack.py` (until the store's `export_tiles.py --pack parcels`) | parcel: sg21, type, label, town, area, muni, and where a roll matched value, cat, use, sale, sale_date, roll (plus address and zoning from Joburg's roll); zoom 12-14, about 9M plots |
+| `parcels-<prov>` (`parcels-wc`, `parcels-gt`, ...) | PMTiles, MVT | `datastore/export/export_tiles.py --pack parcels` (replaces `parcels` once the app reads per-province packs) | parcel, z13-16, one pack per province (`region` in installed.json) |
 | `h3`, `places` | PMTiles, MVT | `export_tiles.py` | hex, place |
 | `web-grid`, `web-water`, `web-risk`, `web-nature`, `web-vote`, `web-prop`, `web-land`, `web-places`, `web-move` | PMTiles, MVT | `tools/webpack/build_web_packs.py` | the website map's layers, one vector layer per website layer id (`x:pa` is `x_pa`) |
 | `raster-relief`, `raster-fire`, ... (ten) | PMTiles, PNG | `tools/webpack/build_raster_packs.py` | the website's images as 256 px tiles |
+| `base` | PMTiles, MVT | `tools/webpack/build_base_pack.py` | road (r class 0-7, name, ref, bridge, tunnel), rail, land (c class), poi (k kind), place (r rank); the website's base map, zoom 5-9 from its overview and 10-14 from its regional tiles (about 180 MB) |
+| `buildings` | PMTiles, GSB1 tiles (gzip) | `tools/webpack/build_buildings_pack.py` | 44.2M footprints at zoom 12 in the website's GSB1 encoding (OSM, Google Open Buildings, Microsoft; about 230 MB); the app decodes them in `gsb.cpp` |
 | `find` | JSON | the website's `data/x/find.json`, copied | municipalities (outline, people, area, median value, ward winners), NTCSA free capacity, dams, airports, ports, power stations, towns; served at `/v1/data/find` |
 | `pack` | SQLite, `gsa-pack/1` | `export_pack.py` | tree, metric, parcel, valuation, node, edge, series, series_data, source, snapshot, search (FTS5), pack_info |
 
@@ -65,6 +68,17 @@ its bounds (deck.gl BitmapLayer); the builder cuts the same images into 256 px t
 that matches each image's resolution, and the app stretches the last level beyond it. Climate grids
 (`x/clim/*.json`) are coloured with the website's ramps. The Global Solar Atlas images (solar yield,
 GHI, rooftop potential) are regular in degrees, so the builder resamples their rows to Mercator first.
+
+`tools/webpack/build_base_pack.py` turns the website's base map (`data/bm/overview.json` and the
+106 regional tiles `data/bm/r/X_Y.json`, from OpenStreetMap) into the `base` pack. Below zoom 10 it
+holds the overview (main roads, rail, big land areas, towns); from 10 every road class, land use,
+landmarks and small places, with minor road classes starting at 11, 12 and 14 as on the website.
+
+`tools/webpack/build_parcels_pack.py` builds the `parcels` pack from the project's parcel files: the
+national SG cadastre per municipality, the newer KZN copy, and the Joburg and Ekurhuleni metro stands
+(which replace SG plots with the same `sg21`), joined to the valuation rolls by `sg21`, with the KZN
+COGTA valuation layers filling KZN plots the rolls miss (3.49M of 9.12M plots carry a value, 762 MB). No source has
+owner names or ID numbers, and the roll `unit` column is never joined.
 
 ## Development pack
 

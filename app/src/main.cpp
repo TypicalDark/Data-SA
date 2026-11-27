@@ -53,7 +53,8 @@ int usage(const char* why) {
   std::fprintf(stderr,
                "usage: gsa [--data DIR | --api HOST:PORT] [--backend PATH] [--size WxH] [--validation]\n"
                "           [--screenshot out.png] [--topic NAME] [--select AREA_ID] [--at LON,LAT,ZOOM] [--frames N]\n"
-               "           [--panel find|rank|list|areas|views|watch|keys|catalogue] [--command LINE] [--spot LON,LAT]\n"
+               "           [--panel find|rank|list|areas|views|watch|keys|catalogue] [--command LINE] [--spot LON,LAT] [--pitch DEG]\n"
+               "           [--measure path|area|circle:LON,LAT,LON,LAT...]\n"
                "           [--settings FILE]\n");
   return 2;
 }
@@ -79,6 +80,7 @@ int main(int argc, char** argv) {
     else if (a == "--panel") opt.panel = val();
     else if (a == "--command") opt.command = val();
     else if (a == "--settings") opt.settings_path = val();
+    else if (a == "--measure") opt.measure = val();
     else if (a == "--spot") {
       double lon = 0, lat = 0;
       if (std::sscanf(val().c_str(), "%lf,%lf", &lon, &lat) != 2) return usage("--spot wants LON,LAT");
@@ -93,6 +95,8 @@ int main(int argc, char** argv) {
       double lon, lat, z;
       if (std::sscanf(val().c_str(), "%lf,%lf,%lf", &lon, &lat, &z) != 3) return usage("--at wants LON,LAT,ZOOM");
       opt.lon = lon, opt.lat = lat, opt.zoom = z;
+    } else if (a == "--pitch") {
+      opt.pitch = std::atof(val().c_str());
     } else if (a == "-h" || a == "--help") return usage(nullptr), 0;
     else return usage(("unknown option " + a).c_str());
   }

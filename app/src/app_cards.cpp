@@ -354,6 +354,30 @@ void App::ui_facility(Card& c) {
   if (p.contains("layer")) {
     // a feature of a website layer: tag from its group, kind from the layer
     std::string lid = p["layer"].get<std::string>();
+    if (lid == "parcel") {
+      // a plot: the cadastre and, where a roll matched, its value (no owner details anywhere)
+      const auto* g = layers::group("prop");
+      const auto s = [&](const char* k) { return p.contains(k) ? prop_text(p[k]) : std::string(); };
+      const auto rand = [&](const char* k) {
+        return p.contains(k) && p[k].is_number() ? "R" + find::fmt_num(p[k].get<double>()) : std::string();
+      };
+      std::string sub = s("town");
+      if (!s("muni").empty()) sub += (sub.empty() ? "" : " \xc2\xb7 ") + s("muni");
+      card_head("PLOTS", g ? g->colour : kAccent, "PLOT", s("label").empty() ? "Plot" : s("label"), sub,
+                "Cadastre: Surveyor-General; values: municipal valuation rolls");
+      fn_strip({"HERE", "NEAR", "REACH", "MEAS", "GO", "COPY", "PNG"});
+      const std::pair<const char*, std::string> rows[] = {
+          {"Market value", rand("value")},  {"Roll", s("roll")},          {"Category", s("cat")},
+          {"Use", s("use")},                {"Last sale", rand("sale")},  {"Sale date", s("sale_date")},
+          {"Units on roll", s("units")},    {"Address", s("address")},    {"Zoning", s("zoning")},
+          {"Scheme", s("scheme")},          {"Type", s("type")},
+          {"Area", p.contains("area") && p["area"].is_number() ? find::fmt_num(p["area"].get<double>()) + " m\xc2\xb2" : ""},
+          {"SG code", s("sg21")}};
+      for (const auto& [k, v] : rows)
+        if (!v.empty()) kv_row(k, v);
+      if (!p.contains("value")) kv_row("Market value", "no roll matched");
+      return;
+    }
     const layers::Def* d = nullptr;
     for (const auto& x : layers::catalogue())
       if (layers::mvt_name(x.id) == lid) d = &x;
@@ -1009,6 +1033,15 @@ void App::ui_panel_watch() {
     if (st) std::snprintf(d, sizeof d, "%.0f MW", e.value("mw", 0.0));
     else std::snprintf(d, sizeof d, "%.0f kV", e.value("kv", 0.0));
     dl->AddText(font_small_, 11.5f, ImVec2(p.x + 46, p.y + 20), u32(kFaint), d);
+    // in view or off screen, as on the website
+    {
+      double sx, sy;
+      cam_.to_screen(geo::mx(e.value("lon", 0.0)), geo::my(e.value("lat", 0.0)), sx, sy);
+      const bool iv = sx >= side_width() && sx <= cam_.w && sy >= 0 && sy <= cam_.h - kStatusH;
+      const ImVec2 dc(p.x + cw - 40, p.y + 19);
+      if (iv) dl->AddCircleFilled(dc, 4, u32(kAccent));
+      else dl->AddCircle(dc, 4, u32(kFaint), 0, 1.2f);
+    }
     ImGui::SameLine(0, 4);
     const ImVec2 x0 = ImGui::GetCursorScreenPos();
     if (ImGui::InvisibleButton("##del", ImVec2(24, 38))) remove = int(i);
@@ -1019,6 +1052,39 @@ void App::ui_panel_watch() {
   if (remove >= 0) {
     w.erase(size_t(remove));
     save_settings();
+  }
+  if (!w.empty()) {
+    ImGui::Spacing();
+    ImGui::PushFont(font_mono_);
+    if (chip("Fit all", false, ImVec2(80, 26))) {
+      double x0 = 180, y0 = 90, x1 = -180, y1 = -90;
+      for (const auto& e : w) {
+        x0 = std::min(x0, e.value("lon", 0.0));
+        x1 = std::max(x1, e.value("lon", 0.0));
+        y0 = std::min(y0, e.value("lat", 0.0));
+        y1 = std::max(y1, e.value("lat", 0.0));
+      }
+      fly_to_bbox(x0 - 0.05, y0 - 0.05, x1 + 0.05, y1 + 0.05);
+    }
+    ImGui::SameLine(0, 4);
+    if (chip("Export CSV", false, ImVec2(100, 26))) {
+      std::string csv = "name,kind,kv,mw,lat,lon\n";
+      for (const auto& e : w) {
+        std::string n = e.value("name", "");
+        if (n.find_first_of(",\"") != std::string::npos) {
+          std::string q = "\"";
+          for (char ch : n) q += ch == '"' ? std::string("\"\"") : std::string(1, ch);
+          n = q + "\"";
+        }
+        char b[160];
+        std::snprintf(b, sizeof b, ",%s,%.0f,%.0f,%.5f,%.5f\n", e.value("kind", "").c_str(), e.value("kv", 0.0),
+                      e.value("mw", 0.0), e.value("lat", 0.0), e.value("lon", 0.0));
+        csv += n + b;
+      }
+      ImGui::SetClipboardText(csv.c_str());
+      toast(std::to_string(w.size()) + " watched facilities copied as CSV");
+    }
+    ImGui::PopFont();
   }
   ImGui::Spacing();
   ImGui::PushTextWrapPos(0);
@@ -1082,6 +1148,135 @@ void App::ui_panel_later(const char* title, const char* what, const char* milest
   ImGui::Spacing();
   ImGui::PushTextWrapPos(0);
   ImGui::TextColored(col(kWarn), "This panel comes with milestone %s of the desktop build.", milestone);
+  ImGui::PopTextWrapPos();
+}
+
+
+// ------------------------------------------------------------------ filter (the website's drawFilters)
+
+void App::ui_panel_filter() {
+  if (close_button()) {
+    panel_ = Panel::None;
+    return;
+  }
+  card_head("FILTER", kAccent, "F3", "Filters", "Dim or hide what does not match.", "");
+  ImGui::PushFont(font_mono_);
+  const float tw = (ImGui::GetContentRegionAvail().x - 4) / 2;
+  if (chip("Power and grid", !filter_vote_tab_, ImVec2(tw, 26))) filter_vote_tab_ = false;
+  ImGui::SameLine(0, 4);
+  if (chip("Elections", filter_vote_tab_, ImVec2(tw, 26))) filter_vote_tab_ = true;
+  ImGui::PopFont();
+
+  layers::Filters f = filter_;
+  bool changed = false;
+  // one group of toggle chips, with "Any" to clear it
+  auto group = [&](const char* title, auto& set, const auto& values, auto label, auto swatch) {
+    ImGui::Spacing();
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    section(font_mono_, title);
+    if (!set.empty()) {
+      const ImVec2 after = ImGui::GetCursorScreenPos();
+      ImGui::SetCursorScreenPos(ImVec2(p.x + ImGui::GetContentRegionAvail().x - 40, p.y + 2));
+      ImGui::PushID(title);
+      if (ImGui::SmallButton("Any")) {
+        set.clear();
+        changed = true;
+      }
+      ImGui::PopID();
+      ImGui::SetCursorScreenPos(after);
+    }
+    ImGui::PushFont(font_mono_);
+    float x = 0;
+    const float avail = ImGui::GetContentRegionAvail().x;
+    for (const auto& v : values) {
+      const std::string l = label(v);
+      const uint32_t sw = swatch(v);
+      const float bw = ImGui::CalcTextSize(l.c_str()).x + (sw ? 30.0f : 16.0f);
+      if (x > 0 && x + bw > avail) x = 0;
+      else if (x > 0) ImGui::SameLine(0, 4);
+      x += bw + 4;
+      const bool on = set.count(v) != 0;
+      ImGui::PushID(l.c_str());
+      const ImVec2 c0 = ImGui::GetCursorScreenPos();
+      if (chip(sw ? ("   " + l).c_str() : l.c_str(), on, ImVec2(bw, 24))) {
+        if (on) set.erase(v);
+        else set.insert(v);
+        changed = true;
+      }
+      if (sw) ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(c0.x + 8, c0.y + 8), ImVec2(c0.x + 16, c0.y + 16), sw, 2);
+      ImGui::PopID();
+    }
+    ImGui::PopFont();
+  };
+  auto none = [](const auto&) { return uint32_t(0); };
+  if (!filter_vote_tab_) {
+    const std::vector<int> vb = {0, 1, 2, 3, 4, 5};
+    static const char* const vcol[6] = {"#b0207e", "#e0302d", "#ef7f1a", "#d9b310", "#2aa36b", "#8a97a3"};
+    group("LINE VOLTAGE (KV)", f.volt, vb, [](int i) { return std::string(layers::kVoltBins[i]); },
+          [](int i) { return u32(vcol[i]); });
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextColored(col(kFaint), "Applies to power lines and substations. Untagged means OpenStreetMap has no voltage for it.");
+    ImGui::PopTextWrapPos();
+    std::vector<std::string> fk;
+    for (const auto& [k, l] : layers::fuels()) fk.push_back(k);
+    group("POWER STATIONS BY FUEL", f.fuel, fk,
+          [](const std::string& k) {
+            for (const auto& [key, l] : layers::fuels())
+              if (key == k) return l;
+            return k;
+          },
+          [](const std::string& k) { return u32(style::plant(k)); });
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextColored(col(kFaint), "Most wind and many solar farms are mapped as areas rather than single points, so few show here.");
+    ImGui::PopTextWrapPos();
+  } else {
+    group("WINNING PARTY, 2026", f.party, layers::top_parties(),
+          [](const std::string& p) { return p == "other" ? std::string("Other") : p; },
+          [](const std::string& p) { return u32(style::party(p == "other" ? "" : p, 1.0f)); });
+    const std::vector<int> tb = {0, 1, 2, 3, 4};
+    group("TURNOUT", f.turn, tb, [](int i) { return std::string(layers::kTurnBins[i]); }, none);
+    std::vector<std::string> pv(std::begin(layers::kProvinces), std::end(layers::kProvinces));
+    group("PROVINCE", f.prov, pv, [](const std::string& p) { return p; }, none);
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextColored(col(kFaint), "Filters the 2026 ward winners (Votes, key 3). Winning margins need the full ward results pack.");
+    ImGui::PopTextWrapPos();
+    if (!lstate_.shows("c:ward")) {
+      ImGui::Spacing();
+      if (chip("Show ward winners", false, ImVec2(160, 24))) {
+        lstate_.add("c:ward");
+        apply_layers();
+      }
+    }
+  }
+  ImGui::Spacing();
+  if (ImGui::Checkbox("Hide what's filtered out (instead of dimming it)", &f.hide)) changed = true;
+  if (changed) set_filter(f);
+
+  // summary of what is active
+  std::vector<std::string> parts;
+  auto join_set = [](const auto& set, auto label) {
+    std::string s;
+    for (const auto& v : set) s += (s.empty() ? "" : ", ") + label(v);
+    return s;
+  };
+  if (!filter_.volt.empty()) parts.push_back("lines " + join_set(filter_.volt, [](int i) { return std::string(layers::kVoltBins[i]); }));
+  if (!filter_.fuel.empty()) parts.push_back("stations " + join_set(filter_.fuel, [](const std::string& s) { return s; }));
+  if (!filter_.party.empty()) parts.push_back("won by " + join_set(filter_.party, [](const std::string& s) { return s; }));
+  if (!filter_.turn.empty()) parts.push_back("turnout " + join_set(filter_.turn, [](int i) { return std::string(layers::kTurnBins[i]); }));
+  if (!filter_.prov.empty()) parts.push_back("in " + join_set(filter_.prov, [](const std::string& s) { return s; }));
+  section(font_mono_, "FILTER RESULT");
+  ImGui::PushTextWrapPos(0);
+  if (parts.empty()) ImGui::TextColored(col(kMuted), "Nothing filtered. Pick chips above.");
+  else {
+    std::string s;
+    for (const auto& p : parts) s += (s.empty() ? "" : "; ") + p;
+    ImGui::TextColored(col(kInk), "%s", s.c_str());
+    if (chip("Clear all filters", false, ImVec2(150, 24))) {
+      layers::Filters cleared;
+      cleared.hide = filter_.hide;
+      set_filter(cleared);
+    }
+  }
   ImGui::PopTextWrapPos();
 }
 

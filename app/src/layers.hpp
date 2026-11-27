@@ -56,7 +56,7 @@ struct State {
   std::vector<std::string> on;
   std::set<std::string> hidden;
   std::string focus;
-  bool names = true, roads = true, terrain = true, buildings = false, landmarks = false;
+  bool names = true, roads = true, terrain = true, buildings = false, landmarks = true;
 
   bool shows(const std::string& id) const;  // on and not hidden
   void add(const std::string& id);          // to the top; a choropleth replaces the other one
@@ -84,12 +84,38 @@ float raster_opacity(const std::string& pack, double zoom);
 
 // A website layer drawn from a web pack.
 struct Extra {
-  enum Mode { Auto, Outline, Party } mode = Auto;
+  enum Mode { Auto, Outline, Party, Plots } mode = Auto;
   std::string layer;  // vector layer name in the pack
   Swatch swatch = Swatch::Fill;
   uint32_t rgba = 0;
   bool operator==(const Extra& o) const { return mode == o.mode && layer == o.layer && swatch == o.swatch && rgba == o.rgba; }
 };
+
+// The website's Filter panel (drawFilters): grid lines by voltage, power stations by fuel, and
+// ward results by party, turnout and province. What fails is dimmed, or hidden with `hide`.
+struct Filters {
+  std::set<int> volt;          // volt_bin of lines and substations
+  std::set<std::string> fuel;  // fuel_key of power stations
+  std::set<std::string> party; // ward winner, short name ("ANC") or "other"
+  std::set<int> turn;          // turn_bin of ward turnout
+  std::set<std::string> prov;  // province codes (KZN, EC, LIM, GT, WC, NW, MP, FS, NC)
+  std::set<std::string> prov_munis;  // municipality codes in those provinces (the app fills this in)
+  bool hide = false;
+  bool grid_on() const { return !volt.empty() || !fuel.empty(); }
+  bool vote_on() const { return !party.empty() || !turn.empty() || !prov.empty(); }
+  bool operator==(const Filters&) const = default;
+};
+extern const char* const kVoltBins[6];
+extern const char* const kTurnBins[5];
+extern const char* const kProvinces[9];
+const std::vector<std::pair<std::string, std::string>>& fuels();  // key, label
+const std::vector<std::string>& top_parties();
+int volt_bin(double kv);  // 0: 400 kV and up ... 4: under 50, 5: untagged
+int turn_bin(double pct);
+std::string fuel_key(const std::string& fuel);
+bool pass_volt(const Filters& f, double kv);
+bool pass_fuel(const Filters& f, const std::string& fuel);
+bool pass_ward(const Filters& f, const std::string& party, double turnout, const std::string& muni);
 
 // How the renderer and labels should draw, derived from State.
 struct MapStyle {
@@ -97,14 +123,18 @@ struct MapStyle {
   bool muni_borders = true;
   bool lines = false, subs = false, plants = false;
   bool names = true;
+  bool roads = false, pois = false;  // base map: roads, rail and land use; landmarks
+  bool buildings = false;
+  bool extrude = false;  // 3D: buildings stand up to their heights (the view is tilted)
   std::vector<Extra> extra;  // website layers, bottom first
   std::vector<std::string> rasters;  // image packs to draw over the fills, bottom first
   // Find: municipalities that meet every condition stay lit and the rest go dark
   bool find_on = false;
   std::set<std::string> find_pass;
+  Filters filter;
   bool operator==(const MapStyle& o) const {
     return fill == o.fill && muni_borders == o.muni_borders && lines == o.lines && subs == o.subs && plants == o.plants &&
-           names == o.names && extra == o.extra && rasters == o.rasters && find_on == o.find_on && find_pass == o.find_pass;
+           names == o.names && roads == o.roads && pois == o.pois && buildings == o.buildings && extrude == o.extrude && extra == o.extra && rasters == o.rasters && find_on == o.find_on && find_pass == o.find_pass && filter == o.filter;
   }
   bool operator!=(const MapStyle& o) const { return !(*this == o); }
 };

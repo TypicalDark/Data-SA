@@ -17,6 +17,7 @@
 #include "api_client.hpp"
 #include "geo.hpp"
 #include "find.hpp"
+#include "measure.hpp"
 #include "layers.hpp"
 #include "map_renderer.hpp"
 #include "settings.hpp"
@@ -42,7 +43,9 @@ struct AppOptions {
   std::string panel;           // rail panel to open: find rank list areas views watch keys
   std::string command;         // a command line to run at start, for example "apollo DES"
   std::optional<double> lon, lat, zoom;
+  std::optional<double> pitch;  // tilt in degrees (3D), 0 to 60
   std::optional<std::pair<double, double>> spot;  // right-click spot to open (lon, lat)
+  std::string measure;  // "area:lon,lat,lon,lat,...": a finished measurement (for screenshots)
   int max_frames = 0;          // quit after this many frames (0 = run until closed)
 };
 
@@ -160,6 +163,7 @@ class App {
     double cx, cy, zoom;
   };
   std::optional<Fly> fly_;
+  double pitch_target_ = 0;  // the tilt eases towards this
   bool dragging_ = false, drag_moved_ = false;
   double drag_x_ = 0, drag_y_ = 0;
   std::vector<PackZoom> packs_;      // tile packs drawn now: admin, the web packs in use, grid
@@ -180,6 +184,10 @@ class App {
   std::set<std::string> fpass_;
   std::string rank_key_ = "subs";
   std::string find_toast_;
+  layers::Filters filter_;
+  bool filter_vote_tab_ = false;
+  void set_filter(const layers::Filters& f);
+  void ui_panel_filter();
   void set_rules(std::vector<find::Rule> r);
   layers::MapStyle map_style_now() const;
   char view_name_[64] = {};
@@ -203,6 +211,14 @@ class App {
 
   bool measuring_ = false;
   std::vector<std::pair<double, double>> measure_;  // world points
+  measure::Mode measure_mode_ = measure::Mode::Path;
+  bool measure_done_ = false;
+  std::vector<measure::LonLat> measure_ll() const;
+  void measure_click(double sx, double sy, double wx, double wy);
+  void measure_reset() {
+    measure_.clear();
+    measure_done_ = false;
+  }
 
   std::string hover_name_;
   std::string toast_;

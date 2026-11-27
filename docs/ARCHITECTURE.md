@@ -66,6 +66,26 @@ that should sync later (saved views, watchlists) will go through the API.
   the loader decodes them with stb_image, `MapRenderer` uploads each as its own texture outside the
   render pass (a few per frame) and draws textured quads between the fills and the lines at the
   website's opacities. A missing tile shows the matching part of its nearest loaded parent.
+  The base map comes from the `base` pack, drawn just above the municipalities: land use as fills
+  under the images, roads with casings by class (motorway, major, minor ... tracks, each class from
+  the zoom the website shows it), rail, and in the label pass towns by rank, street names along the
+  roads from zoom 13.3 and landmarks as coloured dots from zoom 14.3 (names from 15.5). The Roads,
+  Names and Landmarks base toggles switch these; the pack is not fetched when all three are off.
+  Buildings come from the `buildings` pack: z12 tiles in the website's GSB1 encoding (rectangles as
+  centre, size and angle; the rest as polygons). `gsb.cpp` decodes a tile into a vector layer with
+  each footprint's height (measured, or estimated as the website does), and the mesh draws them over
+  the roads from zoom 13.3. The pack is fetched only with Buildings on and from zoom 13
+  (`PackZoom::show_from`). Base toggles are saved in the settings under `base`.
+  Plots come from the `parcels` pack from zoom 12.5 while Property plots is on: fills in the website's
+  value bands where a roll matched, thin outlines from 13.5, and a plot card (value, roll, category,
+  use, last sale, area, SG code) on click.
+  3D: `geo::Camera::pitch` (0 to 60 degrees) tilts the ground around the screen centre as seen by a
+  camera 1.5 screen heights above it. Every vertex is placed flat as before and then tilted on the GPU
+  with the same formula as `Camera::tilt` (map and image shaders), with a height in metres for
+  extruded buildings; labels, icons and overlays go through `Camera::to_screen`, and clicks through
+  its inverse `to_world`. Tilted, buildings stand up to their heights: walls shaded by the way they
+  face and roofs, drawn far to near since there is no depth buffer. The 3D button tilts to 50
+  degrees and back; Ctrl+drag tilts by hand; `--pitch` sets it for screenshots.
 - **UI (matches the live website, v57).** Dear ImGui in the same render pass after the map, with the
   website's tokens (`ui_theme.hpp`) and drawn line icons (`icons.cpp`): 60 px icon rail, 380 px docked
   sidebar with the search box and command line, the card or panel, and the On the map dock (group tabs,
@@ -83,7 +103,15 @@ that should sync later (saved views, watchlists) will go through the API.
   drawn with the admin lines so it covers every pack's fills and images. Rank lists seven things in the
   current view (substations, power stations, free capacity, dams lowest first, municipalities by value
   or people, airports). The spot card adds the website's summary (nearest town, dam, free capacity,
-  airport, port, and which Find conditions the spot fails). Saved views keep the conditions. Each window's rectangle goes to the label
+  airport, port, and which Find conditions the spot fails). Saved views keep the conditions.
+- **Filters** (`layers::Filters`, F3). The website's filter panel: power lines and substations by
+  voltage band, power stations by fuel, 2026 ward winners by party, turnout band and province. What
+  fails is dimmed in the mesh and icon passes, or left out with "hide". Filters are saved settings.
+- **Measure** (`measure.cpp`, the website's Measure v2). Path with leg lengths and bearings, area with
+  perimeter, circle with radius, area and circumference; click the last point (or Enter) to finish
+  and the first to close an area; a result pill; copy as text or GeoJSON. Routes along roads and the
+  elevation profile come with Reach. The watchlist shows which watched facilities are in view, fits
+  them all, and exports CSV. Each window's rectangle goes to the label
   engine as a blocker.
 - **Command line** (`commands.cpp`). An UPPERCASE first word or a leading `:` is a command (`GO`, `ADD`,
   `RM`, `HIDE`, `FIND`, `RANK`, `SAVE`, `VIEW` ...); `name CODE` finds the subject and runs the function

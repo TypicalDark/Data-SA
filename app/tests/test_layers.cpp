@@ -53,6 +53,40 @@ TEST_CASE("layer state: one choropleth, hide, remove, topics") {
   CHECK(layers::map_style(s).fill == style::Topic::Overview);
 
   const auto avail = layers::available({"admin", "grid"});
+  CHECK(!avail.count("streets"));
+  const auto with_base = layers::available({"admin", "base"});
+  CHECK(with_base.count("streets"));
+  CHECK(with_base.count("pois"));
+  {
+    layers::State b;
+    CHECK(layers::map_style(b).roads);
+    CHECK(layers::map_style(b).pois);
+    b.roads = false;
+    CHECK(!layers::map_style(b).roads);
+  }
+  // base map style: motorways sit wider than tracks and tracks come in last
+  CHECK(style::road_half_width(0, false) > style::road_half_width(7, false));
+  CHECK(style::road_minz(7, false) > style::road_minz(0, false));
+  CHECK(style::land_use("park", false).a == 255);
+  CHECK(style::land_use("unknown", false).a == 0);
+  CHECK(style::land_use("unknown", true).a == 255);
+  // plots: from the parcels pack, fetched only while shown, coloured by the website's value bands
+  {
+    const std::map<std::string, std::vector<std::string>> pl = {{"parcels", {"parcel"}}};
+    const auto pa = layers::available({"admin", "parcels"}, pl);
+    CHECK(pa.count("parcels"));
+    layers::State ps;
+    CHECK(!layers::packs_needed(ps, pl).count("parcels"));
+    ps.add("parcels");
+    CHECK(layers::packs_needed(ps, pl).count("parcels"));
+    const auto pm = layers::map_style(ps);
+    REQUIRE(!pm.extra.empty());
+    CHECK(pm.extra.back().mode == layers::Extra::Plots);
+    CHECK(pm.extra.back().layer == "parcel");
+    CHECK(style::value_band(50000).packed() == style::hex("#c6dbef").packed());
+    CHECK(style::value_band(1500000).packed() == style::hex("#f2a65a").packed());
+    CHECK(style::value_band(9e6).packed() == style::hex("#9c1f1f").packed());
+  }
   s.set_topic("grid", avail);
   const auto ms = layers::map_style(s);
   CHECK(ms.lines);
@@ -158,4 +192,36 @@ TEST_CASE("image packs: terrain and raster layers") {
   CHECK(ms.rasters[2] == "raster-ships");   // top of the list draws last
   CHECK(layers::raster_opacity("raster-fire", 5) > layers::raster_opacity("raster-fire", 12));
   CHECK(layers::raster_opacity("raster-relief", 12) == 0.0f);  // terrain shading fades out when zoomed in
+}
+
+TEST_CASE("filters: voltage bins, fuels, wards") {
+  CHECK(layers::volt_bin(400) == 0);
+  CHECK(layers::volt_bin(275) == 1);
+  CHECK(layers::volt_bin(132) == 2);
+  CHECK(layers::volt_bin(66) == 3);
+  CHECK(layers::volt_bin(22) == 4);
+  CHECK(layers::volt_bin(0) == 5);
+  CHECK(layers::fuel_key("Oil") == "diesel");
+  CHECK(layers::fuel_key("biogas") == "biomass");
+  CHECK(layers::fuel_key("tidal") == "other");
+  layers::Filters f;
+  CHECK(layers::pass_volt(f, 88));
+  f.volt = {0};
+  CHECK(layers::pass_volt(f, 765));
+  CHECK(!layers::pass_volt(f, 132));
+  f.party = {"DA", "other"};
+  CHECK(layers::pass_ward(f, "DA", 50, "CPT"));
+  CHECK(layers::pass_ward(f, "Good", 50, "CPT"));  // small parties count as other
+  CHECK(!layers::pass_ward(f, "ANC", 50, "CPT"));
+  f.turn = {2};
+  CHECK(!layers::pass_ward(f, "DA", 61, "CPT"));
+  f.turn.clear();
+  f.prov = {"WC"};
+  f.prov_munis = {"CPT"};
+  CHECK(layers::pass_ward(f, "DA", 50, "CPT"));
+  CHECK(!layers::pass_ward(f, "DA", 50, "JHB"));
+  layers::State s;
+  auto ms = layers::map_style(s);
+  ms.filter = f;
+  CHECK(ms != layers::map_style(s));  // a filter change rebuilds the meshes
 }

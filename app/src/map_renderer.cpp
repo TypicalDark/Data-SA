@@ -22,8 +22,14 @@ struct Push {
   float inv_half[2];
   float alpha;
   float px;
+  // tilt (geo::Camera::tilt), framebuffer pixels
+  float centre[2];
+  float sin_p, cos_p;
+  float dist;
+  float zscale;  // framebuffer pixels per metre of height
+  float pad[2];
 };
-static_assert(sizeof(Push) == 32);
+static_assert(sizeof(Push) == 64);
 
 struct RasterPush {
   float origin[2];
@@ -33,8 +39,22 @@ struct RasterPush {
   float uv0[2];
   float uvk;
   float pad[3];
+  float centre[2];
+  float sin_p, cos_p;
+  float dist;
+  float pad2[3];
 };
-static_assert(sizeof(RasterPush) == 48);
+static_assert(sizeof(RasterPush) == 80);
+
+template <typename P>
+void set_tilt(P& pc, const geo::Camera& cam, float dpr) {
+  const double t = cam.pitch * geo::kPi / 180;
+  pc.centre[0] = float(cam.w / 2 * dpr);
+  pc.centre[1] = float(cam.h / 2 * dpr);
+  pc.sin_p = float(std::sin(t));
+  pc.cos_p = float(std::cos(t));
+  pc.dist = float(cam.dist() * dpr);
+}
 constexpr uint32_t kMaxImages = 512;      // descriptor sets for image tiles
 constexpr int kImageUploadsPerFrame = 12;  // spread big jumps over a few frames
 }  // namespace
@@ -53,16 +73,17 @@ MapRenderer::MapRenderer(vk::Context& ctx) : ctx_(ctx), text_(ctx) {
   st[0] = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vs, "main", nullptr};
   st[1] = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, fs, "main", nullptr};
   VkVertexInputBindingDescription bind{0, sizeof(mesh::Vertex), VK_VERTEX_INPUT_RATE_VERTEX};
-  VkVertexInputAttributeDescription attr[4] = {
+  VkVertexInputAttributeDescription attr[5] = {
       {0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(mesh::Vertex, x)},
       {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(mesh::Vertex, ex)},
       {2, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(mesh::Vertex, rgba)},
       {3, 0, VK_FORMAT_R32_SFLOAT, offsetof(mesh::Vertex, minz)},
+      {4, 0, VK_FORMAT_R32_SFLOAT, offsetof(mesh::Vertex, h)},
   };
   VkPipelineVertexInputStateCreateInfo vi{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
   vi.vertexBindingDescriptionCount = 1;
   vi.pVertexBindingDescriptions = &bind;
-  vi.vertexAttributeDescriptionCount = 4;
+  vi.vertexAttributeDescriptionCount = 5;
   vi.pVertexAttributeDescriptions = attr;
   VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
   ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -299,7 +320,7 @@ void MapRenderer::upload(const TileKey& k, GpuTile& g) {
   g.fill = g.lines = g.symbols = 0;
   if (!g.tile) return;
   mesh::Mesh m;
-  mesh::build(k.pack, *g.tile, style_, m);
+  mesh::build(k.pack, *g.tile, style_, m, k.id.z);
   if (m.vertex_count() == 0) return;
   g.buf = ctx_.create_buffer(m.vertex_count() * sizeof(mesh::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
   auto* dst = static_cast<mesh::Vertex*>(g.buf.mapped);
@@ -346,6 +367,7 @@ int MapRenderer::tile_zoom(double zoom, const PackZoom& p) {
 std::vector<TileKey> MapRenderer::needed(const geo::Camera& cam, const std::vector<PackZoom>& packs) const {
   std::vector<TileKey> out;
   for (const auto& p : packs) {
+    if (cam.zoom < p.show_from) continue;
     const int tz = tile_zoom(cam.zoom, p);
     // the parent level first, so something shows quickly when jumping far
     if (tz > p.minzoom)
@@ -361,6 +383,7 @@ std::vector<TileKey> MapRenderer::drawable(const geo::Camera& cam, const std::ve
   std::vector<TileKey> out;
   std::set<TileKey> seen;
   for (const auto& p : packs) {
+    if (cam.zoom < p.show_from) continue;
     const int tz = tile_zoom(cam.zoom, p);
     std::vector<TileKey> fallbacks, exact;
     for (const auto& id : geo::cover(cam, tz)) {
@@ -442,8 +465,9 @@ void MapRenderer::prepare(const geo::Camera& cam, const std::vector<PackZoom>& p
       t.picks = &picks_;
       t.pack = k.pack;
       t.id = k.id;
-      cam.to_screen(k.id.ox(), k.id.oy(), t.ox, t.oy);
+      cam.to_flat(k.id.ox(), k.id.oy(), t.ox, t.oy);
       t.k = k.id.size() * scale;
+      t.cam = &cam;
       map_labels::collect(t, style_, cam.zoom, fonts_, engine_);
     }
     engine_.finish(dt, text_verts_);
@@ -476,6 +500,9 @@ void MapRenderer::draw(VkCommandBuffer cmd, const geo::Camera& cam, float dpr) {
   pc.alpha = 1.0f;
   pc.px = dpr;
   const double scale = cam.scale();
+  set_tilt(pc, cam, dpr);
+  // metres -> pixels at the centre's latitude (Mercator stretches both ways alike)
+  pc.zscale = float(scale * dpr / (40075016.686 * std::cos(geo::lat_of(cam.cy) * geo::kPi / 180)));
 
   // three passes so borders and symbols always sit above every tile's fills; images go over the fills
   for (int pass = 0; pass < 3; ++pass) {
@@ -493,7 +520,7 @@ void MapRenderer::draw(VkCommandBuffer cmd, const geo::Camera& cam, float dpr) {
       const uint32_t count = pass == 0 ? g.fill : pass == 1 ? g.lines : g.symbols;
       if (!count) continue;
       double sx, sy;
-      cam.to_screen(k.id.ox(), k.id.oy(), sx, sy);
+      cam.to_flat(k.id.ox(), k.id.oy(), sx, sy);
       pc.origin[0] = float(sx * dpr);
       pc.origin[1] = float(sy * dpr);
       pc.k = float(k.id.size() * scale * dpr);
@@ -515,11 +542,12 @@ void MapRenderer::draw_rasters(VkCommandBuffer cmd, const geo::Camera& cam, floa
   RasterPush pc{};
   pc.inv_half[0] = 2.0f / float(ext.width);
   pc.inv_half[1] = 2.0f / float(ext.height);
+  set_tilt(pc, cam, dpr);
   for (const auto& d : raster_draws_) {
     const auto& g = tiles_.at(d.src);
     if (!g.ready) continue;
     double sx, sy;
-    cam.to_screen(d.at.ox(), d.at.oy(), sx, sy);
+    cam.to_flat(d.at.ox(), d.at.oy(), sx, sy);
     pc.origin[0] = float(sx * dpr);
     pc.origin[1] = float(sy * dpr);
     pc.k = float(d.at.size() * scale * dpr);
@@ -567,7 +595,7 @@ std::optional<MapRenderer::WebHit> MapRenderer::pick_web(double sx, double sy, c
     // the most detailed drawn tile that holds the point
     const TileKey* best = nullptr;
     for (const auto& k : keys_) {
-      if (k.pack.rfind("web-", 0) != 0) continue;
+      if (k.pack.rfind("web-", 0) != 0 && k.pack != "parcels") continue;
       const double n = double(1u << k.id.z);
       if (uint32_t(wx * n) != k.id.x || uint32_t(wy * n) != k.id.y) continue;
       auto it = tiles_.find(k);
