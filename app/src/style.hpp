@@ -43,6 +43,8 @@ Rgba land_use(const std::string& c, bool overview);
 Rgba road(int r, bool casing);
 float road_half_width(int r, bool overview);
 float road_minz(int r, bool overview);
+// The website's market value bands (MV_BANDS), rand.
+Rgba value_band(double rand, float alpha = 1.0f);
 // Landmark colour by kind (hospital, school, police ...).
 Rgba poi(const std::string& k);
 Rgba background();

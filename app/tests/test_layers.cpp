@@ -70,6 +70,23 @@ TEST_CASE("layer state: one choropleth, hide, remove, topics") {
   CHECK(style::land_use("park", false).a == 255);
   CHECK(style::land_use("unknown", false).a == 0);
   CHECK(style::land_use("unknown", true).a == 255);
+  // plots: from the parcels pack, fetched only while shown, coloured by the website's value bands
+  {
+    const std::map<std::string, std::vector<std::string>> pl = {{"parcels", {"parcel"}}};
+    const auto pa = layers::available({"admin", "parcels"}, pl);
+    CHECK(pa.count("parcels"));
+    layers::State ps;
+    CHECK(!layers::packs_needed(ps, pl).count("parcels"));
+    ps.add("parcels");
+    CHECK(layers::packs_needed(ps, pl).count("parcels"));
+    const auto pm = layers::map_style(ps);
+    REQUIRE(!pm.extra.empty());
+    CHECK(pm.extra.back().mode == layers::Extra::Plots);
+    CHECK(pm.extra.back().layer == "parcel");
+    CHECK(style::value_band(50000).packed() == style::hex("#c6dbef").packed());
+    CHECK(style::value_band(1500000).packed() == style::hex("#f2a65a").packed());
+    CHECK(style::value_band(9e6).packed() == style::hex("#9c1f1f").packed());
+  }
   s.set_topic("grid", avail);
   const auto ms = layers::map_style(s);
   CHECK(ms.lines);

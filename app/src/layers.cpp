@@ -302,6 +302,7 @@ std::set<std::string> available(const std::vector<std::string>& packs, const std
     if (p == "grid") a.insert({"lines", "subs", "plants"});
     if (p == "base") a.insert({"streets", "pois"});
     if (p == "buildings") a.insert("buildings");
+    if (p == "parcels") a.insert("parcels");
   }
   std::set<std::string> names;
   for (const auto& [pack, ls] : pack_layers)
@@ -321,6 +322,7 @@ std::set<std::string> packs_needed(const State& s, const std::map<std::string, s
     for (const auto& [pack, ls] : pack_layers)
       if (pack.rfind("web-", 0) == 0 && std::find(ls.begin(), ls.end(), n) != ls.end()) want.insert(pack);
     if (pack_layers.count(raster_pack(id))) want.insert(raster_pack(id));
+    if (id == "parcels" && pack_layers.count("parcels")) want.insert("parcels");
   }
   if (s.terrain && pack_layers.count("raster-relief")) want.insert("raster-relief");
   return want;
@@ -347,6 +349,10 @@ MapStyle map_style(const State& s) {
     if (const auto rp = raster_pack(id); !rp.empty()) m.rasters.push_back(rp);
     if (id == "c:ward") {
       m.extra.push_back({Extra::Party, "wards", Swatch::Fill, 0});
+      continue;
+    }
+    if (id == "parcels") {  // the plots pack: coloured by roll value
+      m.extra.push_back({Extra::Plots, "parcel", Swatch::Fill, 0});
       continue;
     }
     if (builtin(id)) continue;

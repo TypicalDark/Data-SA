@@ -354,6 +354,30 @@ void App::ui_facility(Card& c) {
   if (p.contains("layer")) {
     // a feature of a website layer: tag from its group, kind from the layer
     std::string lid = p["layer"].get<std::string>();
+    if (lid == "parcel") {
+      // a plot: the cadastre and, where a roll matched, its value (no owner details anywhere)
+      const auto* g = layers::group("prop");
+      const auto s = [&](const char* k) { return p.contains(k) ? prop_text(p[k]) : std::string(); };
+      const auto rand = [&](const char* k) {
+        return p.contains(k) && p[k].is_number() ? "R" + find::fmt_num(p[k].get<double>()) : std::string();
+      };
+      std::string sub = s("town");
+      if (!s("muni").empty()) sub += (sub.empty() ? "" : " \xc2\xb7 ") + s("muni");
+      card_head("PLOTS", g ? g->colour : kAccent, "PLOT", s("label").empty() ? "Plot" : s("label"), sub,
+                "Cadastre: Surveyor-General; values: municipal valuation rolls");
+      fn_strip({"HERE", "NEAR", "REACH", "MEAS", "GO", "COPY", "PNG"});
+      const std::pair<const char*, std::string> rows[] = {
+          {"Market value", rand("value")},  {"Roll", s("roll")},          {"Category", s("cat")},
+          {"Use", s("use")},                {"Last sale", rand("sale")},  {"Sale date", s("sale_date")},
+          {"Units on roll", s("units")},    {"Address", s("address")},    {"Zoning", s("zoning")},
+          {"Scheme", s("scheme")},          {"Type", s("type")},
+          {"Area", p.contains("area") && p["area"].is_number() ? find::fmt_num(p["area"].get<double>()) + " m\xc2\xb2" : ""},
+          {"SG code", s("sg21")}};
+      for (const auto& [k, v] : rows)
+        if (!v.empty()) kv_row(k, v);
+      if (!p.contains("value")) kv_row("Market value", "no roll matched");
+      return;
+    }
     const layers::Def* d = nullptr;
     for (const auto& x : layers::catalogue())
       if (layers::mvt_name(x.id) == lid) d = &x;

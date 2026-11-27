@@ -77,9 +77,12 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
       const std::string type = p.value("tile_type", "");
       // vector packs, and image packs ("raster-...") as PNG
       if (type != "mvt" && !(type == "png" && is_raster_pack(id)) && id != "buildings") continue;
+      // plots draw from 12.5 as on the website, buildings from 13
       pack_ids.push_back(id);
-      if (id == "admin" || id == "base" || id == "buildings" || id == "grid" || id.rfind("web-", 0) == 0 || is_raster_pack(id))
-        all_packs_.push_back({id, p.value("minzoom", 0), p.value("maxzoom", 14), id == "buildings" ? 13.0 : 0.0});
+      if (id == "admin" || id == "base" || id == "buildings" || id == "parcels" || id == "grid" || id.rfind("web-", 0) == 0 ||
+          is_raster_pack(id))
+        all_packs_.push_back({id, p.value("minzoom", 0), p.value("maxzoom", 14),
+                              id == "buildings" ? 13.0 : id == "parcels" ? 12.5 : 0.0});
       auto& names = pack_layers_[id];
       for (const auto& l : p.value("layers", json::array())) {
         if (l.is_string()) names.push_back(l.get<std::string>());
@@ -522,7 +525,8 @@ void App::apply_layers() {
   for (const auto& p : all_packs_) {
     if (p.pack == "base" && !base) continue;
     if (p.pack == "buildings" && !lstate_.buildings) continue;
-    if ((p.pack.rfind("web-", 0) != 0 && !is_raster_pack(p.pack)) || want.count(p.pack)) packs_.push_back(p);
+    const bool on_demand = p.pack.rfind("web-", 0) == 0 || is_raster_pack(p.pack) || p.pack == "parcels";
+    if (!on_demand || want.count(p.pack)) packs_.push_back(p);
   }
 }
 

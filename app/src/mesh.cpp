@@ -140,7 +140,7 @@ void build(const std::string& pack, const mvt::Tile& tile, const layers::MapStyl
     if (ms.roads) base_map(tile, z < 10, out);
     return;
   }
-  if (pack.rfind("web-", 0) == 0) {
+  if (pack.rfind("web-", 0) == 0 || pack == "parcels") {
     // website layers: areas tinted with an outline, lines, and points as small squares
     for (const auto& e : ms.extra) {
       const auto* l = tile.layer(e.layer);
@@ -159,6 +159,10 @@ void build(const std::string& pack, const mvt::Tile& tile, const layers::MapStyl
           case mvt::GeomType::Polygon: {
             if (e.mode == layers::Extra::Outline) {
               outline(f, 0.45f, with_alpha(base, 0.8f), 0, out.lines);
+            } else if (e.mode == layers::Extra::Plots) {
+              // the website's plots: value bands, outlines once the plots are big enough to read
+              if (const auto v = f.num("value"); v && *v > 0) add_polygon(f, style::value_band(*v, 0.55f).packed(), out.fill);
+              outline(f, 0.35f, style::hex("#c9d6de", 0.35f).packed(), 13.5f, out.lines);
             } else if (e.mode == layers::Extra::Party) {
               const bool pass = !ms.filter.vote_on() ||
                                 layers::pass_ward(ms.filter, f.str("party"), f.num("turnout").value_or(-1), f.str("muni"));

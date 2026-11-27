@@ -179,4 +179,14 @@ Rgba poi(const std::string& k) {
   return hex("#b48ce0");  // museum, place of worship
 }
 
+Rgba value_band(double v, float alpha) {
+  static const std::pair<double, const char*> b[] = {{0, "#c6dbef"},       {100000, "#93c0e2"},  {250000, "#5c9fd6"},
+                                                     {500000, "#f2c35a"},  {1000000, "#f2a65a"}, {2000000, "#e0602a"},
+                                                     {4000000, "#9c1f1f"}};
+  const char* c = b[0].second;
+  for (const auto& [lo, col] : b)
+    if (v >= lo) c = col;
+  return hex(c, alpha);
+}
+
 }  // namespace gsa::style

@@ -10,7 +10,7 @@ exports.
 |---|---|---|---|
 | `admin` | PMTiles, MVT | `export_tiles.py --pack admin` | province, district, municipality, ward, suburb, label |
 | `grid` | PMTiles, MVT | `export_tiles.py --pack grid` | line, facility |
-| `parcels`, `parcels-<prov>` | PMTiles, MVT | `export_tiles.py --pack parcels` | parcel |
+| `parcels` | PMTiles, MVT | `tools/webpack/build_parcels_pack.py` (until the store's `export_tiles.py --pack parcels`) | parcel: sg21, type, label, town, area, muni, and where a roll matched value, cat, use, sale, sale_date, roll (plus address and zoning from Joburg's roll); zoom 12-14, about 9M plots |
 | `h3`, `places` | PMTiles, MVT | `export_tiles.py` | hex, place |
 | `web-grid`, `web-water`, `web-risk`, `web-nature`, `web-vote`, `web-prop`, `web-land`, `web-places`, `web-move` | PMTiles, MVT | `tools/webpack/build_web_packs.py` | the website map's layers, one vector layer per website layer id (`x:pa` is `x_pa`) |
 | `raster-relief`, `raster-fire`, ... (ten) | PMTiles, PNG | `tools/webpack/build_raster_packs.py` | the website's images as 256 px tiles |
@@ -48,6 +48,11 @@ GHI, rooftop potential) are regular in degrees, so the builder resamples their r
 106 regional tiles `data/bm/r/X_Y.json`, from OpenStreetMap) into the `base` pack. Below zoom 10 it
 holds the overview (main roads, rail, big land areas, towns); from 10 every road class, land use,
 landmarks and small places, with minor road classes starting at 11, 12 and 14 as on the website.
+
+`tools/webpack/build_parcels_pack.py` builds the `parcels` pack from the project's parcel files: the
+national SG cadastre per municipality, the newer KZN copy, and the Joburg and Ekurhuleni metro stands
+(which replace SG plots with the same `sg21`), joined to the valuation rolls by `sg21`. No source has
+owner names or ID numbers, and the roll `unit` column is never joined.
 
 ## Development pack
 

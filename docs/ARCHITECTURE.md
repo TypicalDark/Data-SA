@@ -70,6 +70,9 @@ that should sync later (saved views, watchlists) will go through the API.
   each footprint's height (measured, or estimated as the website does), and the mesh draws them over
   the roads from zoom 13.3. The pack is fetched only with Buildings on and from zoom 13
   (`PackZoom::show_from`). Base toggles are saved in the settings under `base`.
+  Plots come from the `parcels` pack from zoom 12.5 while Property plots is on: fills in the website's
+  value bands where a roll matched, thin outlines from 13.5, and a plot card (value, roll, category,
+  use, last sale, area, SG code) on click.
 - **UI (matches the live website, v57).** Dear ImGui in the same render pass after the map, with the
   website's tokens (`ui_theme.hpp`) and drawn line icons (`icons.cpp`): 60 px icon rail, 380 px docked
   sidebar with the search box and command line, the card or panel, and the On the map dock (group tabs,

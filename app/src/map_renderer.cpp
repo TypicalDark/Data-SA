@@ -569,7 +569,7 @@ std::optional<MapRenderer::WebHit> MapRenderer::pick_web(double sx, double sy, c
     // the most detailed drawn tile that holds the point
     const TileKey* best = nullptr;
     for (const auto& k : keys_) {
-      if (k.pack.rfind("web-", 0) != 0) continue;
+      if (k.pack.rfind("web-", 0) != 0 && k.pack != "parcels") continue;
       const double n = double(1u << k.id.z);
       if (uint32_t(wx * n) != k.id.x || uint32_t(wy * n) != k.id.y) continue;
       auto it = tiles_.find(k);

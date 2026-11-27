@@ -84,7 +84,7 @@ float raster_opacity(const std::string& pack, double zoom);
 
 // A website layer drawn from a web pack.
 struct Extra {
-  enum Mode { Auto, Outline, Party } mode = Auto;
+  enum Mode { Auto, Outline, Party, Plots } mode = Auto;
   std::string layer;  // vector layer name in the pack
   Swatch swatch = Swatch::Fill;
   uint32_t rgba = 0;
