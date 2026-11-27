@@ -2,8 +2,32 @@
 
 #include <chrono>
 #include <cstdio>
+#include <stdexcept>
+
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#define STBI_NO_STDIO
+#define STBI_FAILURE_USERMSG
+#include <stb_image.h>
 
 namespace gsa {
+
+bool is_raster_pack(const std::string& pack) { return pack.rfind("raster-", 0) == 0; }
+
+namespace {
+std::shared_ptr<const Raster> decode_png(const std::string& body) {
+  int w = 0, h = 0, n = 0;
+  unsigned char* px = stbi_load_from_memory(reinterpret_cast<const unsigned char*>(body.data()), int(body.size()), &w,
+                                            &h, &n, 4);
+  if (!px) throw std::runtime_error(std::string("bad image: ") + stbi_failure_reason());
+  auto r = std::make_shared<Raster>();
+  r->w = w;
+  r->h = h;
+  r->rgba.assign(px, px + size_t(w) * size_t(h) * 4);
+  stbi_image_free(px);
+  return r;
+}
+}  // namespace
 
 TileLoader::TileLoader(api::Endpoint ep, int threads) : ep_(std::move(ep)) {
   for (int i = 0; i < threads; ++i) threads_.emplace_back([this] { run(); });
@@ -53,7 +77,8 @@ void TileLoader::run() {
     bool ok = true;
     if (r.status == 200) {
       try {
-        lt.tile = std::make_shared<const mvt::Tile>(mvt::decode(r.body));
+        if (is_raster_pack(k.pack)) lt.raster = decode_png(r.body);
+        else lt.tile = std::make_shared<const mvt::Tile>(mvt::decode(r.body));
       } catch (const std::exception& e) {
         std::fprintf(stderr, "tile %s/%d/%u/%u: %s\n", k.pack.c_str(), k.id.z, k.id.x, k.id.y, e.what());
         ok = false;

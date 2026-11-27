@@ -457,13 +457,18 @@ void Context::destroy_now(Buffer& b) {
 }
 
 void Context::destroy_later(Buffer b) {
-  if (b.buf) garbage_.push_back({b, frame_count_});
+  if (b.buf) garbage_.push_back({b, frame_count_, {}});
+}
+
+void Context::destroy_later(std::function<void()> fn) {
+  if (fn) garbage_.push_back({Buffer{}, frame_count_, std::move(fn)});
 }
 
 void Context::collect_garbage(bool all) {
   auto it = std::remove_if(garbage_.begin(), garbage_.end(), [&](Garbage& g) {
     if (all || frame_count_ >= g.frame + kFramesInFlight + 1) {
       destroy_now(g.b);
+      if (g.fn) g.fn();
       return true;
     }
     return false;

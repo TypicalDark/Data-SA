@@ -222,6 +222,26 @@ std::string mvt_name(const std::string& id) {
   return n;
 }
 
+std::string raster_pack(const std::string& id) {
+  static const std::set<std::string> raster = {"relief", "x:fire", "x:flood", "x:ships", "x:farms", "x:rain12", "x:rainn",
+                                             "x:pvout", "x:ghi", "x:roof"};
+  if (!raster.count(id)) return {};
+  return "raster-" + (id.rfind("x:", 0) == 0 ? id.substr(2) : id);
+}
+
+float raster_opacity(const std::string& pack, double z) {
+  // the website's BitmapLayer opacities (dark theme)
+  if (pack == "raster-relief") return z < 7.6 ? 0.9f : float(std::max(0.0, 0.9 - (z - 7.6) * 0.5));
+  // the website fades the farm image out past z8 where its field outlines take over; the desktop keeps it
+  // until a field pack ships
+  if (pack == "raster-farms") return 0.9f;
+  if (pack == "raster-ships") return 0.7f;
+  if (pack == "raster-fire") return z > 10 ? 0.6f : 0.85f;
+  if (pack == "raster-rain12" || pack == "raster-rainn") return z > 10 ? 0.45f : z > 8 ? 0.65f : 0.85f;
+  if (pack == "raster-pvout" || pack == "raster-ghi" || pack == "raster-roof") return z > 10 ? 0.5f : 0.8f;
+  return 1.0f;
+}
+
 namespace {
 // layers drawn by the built-in admin and grid code, not as website extras
 bool builtin(const std::string& id) {
@@ -238,8 +258,9 @@ std::set<std::string> available(const std::vector<std::string>& packs, const std
   std::set<std::string> names;
   for (const auto& [pack, ls] : pack_layers)
     if (pack.rfind("web-", 0) == 0) names.insert(ls.begin(), ls.end());
+  const std::set<std::string> ids(packs.begin(), packs.end());
   for (const auto& d : catalogue())
-    if (names.count(mvt_name(d.id))) a.insert(d.id);
+    if (names.count(mvt_name(d.id)) || ids.count(raster_pack(d.id))) a.insert(d.id);
   if (names.count("wards")) a.insert("c:ward");
   return a;
 }
@@ -251,7 +272,9 @@ std::set<std::string> packs_needed(const State& s, const std::map<std::string, s
     const std::string n = id == "c:ward" ? "wards" : mvt_name(id);
     for (const auto& [pack, ls] : pack_layers)
       if (pack.rfind("web-", 0) == 0 && std::find(ls.begin(), ls.end(), n) != ls.end()) want.insert(pack);
+    if (pack_layers.count(raster_pack(id))) want.insert(raster_pack(id));
   }
+  if (s.terrain && pack_layers.count("raster-relief")) want.insert("raster-relief");
   return want;
 }
 
@@ -265,10 +288,12 @@ MapStyle map_style(const State& s) {
   m.subs = s.shows("subs");
   m.plants = s.shows("plants");
   m.names = s.names;
+  if (s.terrain) m.rasters.push_back("raster-relief");
   // website layers, bottom of the list first so the top of the list draws last
   for (auto it = s.on.rbegin(); it != s.on.rend(); ++it) {
     const std::string& id = *it;
     if (!s.shows(id)) continue;
+    if (const auto rp = raster_pack(id); !rp.empty()) m.rasters.push_back(rp);
     if (id == "c:ward") {
       m.extra.push_back({Extra::Party, "wards", Swatch::Fill, 0});
       continue;

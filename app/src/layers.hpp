@@ -56,7 +56,7 @@ struct State {
   std::vector<std::string> on;
   std::set<std::string> hidden;
   std::string focus;
-  bool names = true, roads = true, terrain = false, buildings = false, landmarks = false;
+  bool names = true, roads = true, terrain = true, buildings = false, landmarks = false;
 
   bool shows(const std::string& id) const;  // on and not hidden
   void add(const std::string& id);          // to the top; a choropleth replaces the other one
@@ -74,8 +74,13 @@ std::string mvt_name(const std::string& id);
 // "web-water" ...); `pack_layers` the vector layers each pack holds (from /v1/packs).
 std::set<std::string> available(const std::vector<std::string>& packs,
                                 const std::map<std::string, std::vector<std::string>>& pack_layers = {});
-// The website-layer packs ("web-...") that hold a layer the state shows.
+// The website-layer packs ("web-..." and "raster-...") that hold a layer the state shows.
 std::set<std::string> packs_needed(const State& s, const std::map<std::string, std::vector<std::string>>& pack_layers);
+
+// The image-tile pack that draws a layer ("relief" -> "raster-relief", "x:fire" -> "raster-fire").
+std::string raster_pack(const std::string& id);
+// How opaque the website draws a raster layer at a zoom.
+float raster_opacity(const std::string& pack, double zoom);
 
 // A website layer drawn from a web pack.
 struct Extra {
@@ -93,9 +98,10 @@ struct MapStyle {
   bool lines = false, subs = false, plants = false;
   bool names = true;
   std::vector<Extra> extra;  // website layers, bottom first
+  std::vector<std::string> rasters;  // image packs to draw over the fills, bottom first
   bool operator==(const MapStyle& o) const {
     return fill == o.fill && muni_borders == o.muni_borders && lines == o.lines && subs == o.subs && plants == o.plants &&
-           names == o.names && extra == o.extra;
+           names == o.names && extra == o.extra && rasters == o.rasters;
   }
   bool operator!=(const MapStyle& o) const { return !(*this == o); }
 };

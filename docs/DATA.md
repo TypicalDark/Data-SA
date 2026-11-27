@@ -30,7 +30,15 @@ exports.
 `web-*.pmtiles` packs (about 160 MB together), so the app draws the same layers as the website until
 the data store exports them directly. Every feature carries `name` and `detail` plus a few numbers.
 Rights holders on mining rights, business phone numbers and anything naming a private person are left
-out. Raster layers (fire, flood, solar yield, rain grids, hillshade) are not in these packs yet.
+out.
+
+`tools/webpack/build_raster_packs.py` turns the website's images into ten PNG tile packs
+(`raster-relief`, `raster-fire`, `raster-flood`, `raster-ships`, `raster-farms`, `raster-rain12`,
+`raster-rainn`, `raster-pvout`, `raster-ghi`, `raster-roof`, about 87 MB together). The website stretches each image linearly in Web Mercator over
+its bounds (deck.gl BitmapLayer); the builder cuts the same images into 256 px tiles up to the zoom
+that matches each image's resolution, and the app stretches the last level beyond it. Climate grids
+(`x/clim/*.json`) are coloured with the website's ramps. The Global Solar Atlas images (solar yield,
+GHI, rooftop potential) are regular in degrees, so the builder resamples their rows to Mercator first.
 
 ## Development pack
 

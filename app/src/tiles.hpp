@@ -26,9 +26,17 @@ struct TileKey {
   bool operator==(const TileKey& o) const = default;
 };
 
+// A decoded image tile from a raster pack ("raster-..."), RGBA8.
+struct Raster {
+  int w = 0, h = 0;
+  std::vector<uint8_t> rgba;
+};
+bool is_raster_pack(const std::string& pack);
+
 struct LoadedTile {
   TileKey key;
   std::shared_ptr<const mvt::Tile> tile;  // null = the pack has no tile here (204)
+  std::shared_ptr<const Raster> raster;   // raster packs only
 };
 
 class TileLoader {

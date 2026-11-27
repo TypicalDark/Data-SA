@@ -42,9 +42,9 @@ class MapRenderer {
   // rectangles, logical pixels). dt < 0 skips label fades.
   void prepare(const geo::Camera& cam, const std::vector<PackZoom>& packs, const std::vector<text::Rect>& blockers,
                double dt);
-  // Outside the render pass: uploads the glyph atlas when it changed.
+  // Outside the render pass: uploads the glyph atlas when it changed, and new image tiles.
   void upload(VkCommandBuffer cmd);
-  // Inside the render pass: fills, lines, then icons and text.
+  // Inside the render pass: fills, image layers, lines, then icons and text.
   void draw(VkCommandBuffer cmd, const geo::Camera& cam, float dpr);
 
   bool labels_animating() const { return engine_.animating(); }
@@ -66,19 +66,45 @@ class MapRenderer {
   size_t vertex_count() const { return vertices_; }
 
  private:
+  struct GpuImage {
+    VkImage image = VK_NULL_HANDLE;
+    VkDeviceMemory mem = VK_NULL_HANDLE;
+    VkImageView view = VK_NULL_HANDLE;
+    VkDescriptorSet set = VK_NULL_HANDLE;
+  };
   struct GpuTile {
     std::shared_ptr<const mvt::Tile> tile;
+    std::shared_ptr<const Raster> raster;  // image packs: kept until uploaded
     vk::Buffer buf;
+    GpuImage img;
+    bool ready = false;  // image uploaded
     uint32_t fill = 0, lines = 0, symbols = 0;
     uint64_t used = 0;
   };
+  // One image tile, or the matching part of a loaded ancestor, on one screen tile.
+  struct RasterDraw {
+    TileKey src;
+    geo::TileId at;
+    float u0 = 0, v0 = 0, uk = 1;
+    float alpha = 1;
+  };
   void upload(const TileKey& k, GpuTile& g);
+  void upload_image(VkCommandBuffer cmd, GpuTile& g);
+  void release(GpuTile& g);
+  void init_raster_pipeline();
+  void draw_rasters(VkCommandBuffer cmd, const geo::Camera& cam, float dpr);
   std::vector<TileKey> drawable(const geo::Camera& cam, const std::vector<PackZoom>& packs) const;
   static int tile_zoom(double zoom, const PackZoom& p);
 
   vk::Context& ctx_;
   VkPipelineLayout layout_ = VK_NULL_HANDLE;
   VkPipeline pipeline_ = VK_NULL_HANDLE;
+  VkPipelineLayout raster_layout_ = VK_NULL_HANDLE;
+  VkPipeline raster_pipeline_ = VK_NULL_HANDLE;
+  VkDescriptorSetLayout raster_set_layout_ = VK_NULL_HANDLE;
+  VkDescriptorPool raster_pool_ = VK_NULL_HANDLE;
+  VkSampler raster_sampler_ = VK_NULL_HANDLE;
+  std::vector<RasterDraw> raster_draws_;  // from prepare()
   layers::MapStyle style_;
   std::vector<map_labels::FeatureRef> picks_;
   std::map<TileKey, GpuTile> tiles_;

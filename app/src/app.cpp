@@ -72,10 +72,13 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
   std::vector<std::string> pack_ids;
   if (auto packs = api_->get_json("/v1/packs", &err)) {
     for (const auto& p : *packs) {
-      if (p.value("kind", "") != "tiles" || p.value("tile_type", "") != "mvt") continue;
+      if (p.value("kind", "") != "tiles") continue;
       const std::string id = p["id"];
+      const std::string type = p.value("tile_type", "");
+      // vector packs, and image packs ("raster-...") as PNG
+      if (type != "mvt" && !(type == "png" && is_raster_pack(id))) continue;
       pack_ids.push_back(id);
-      if (id == "admin" || id == "grid" || id.rfind("web-", 0) == 0)
+      if (id == "admin" || id == "grid" || id.rfind("web-", 0) == 0 || is_raster_pack(id))
         all_packs_.push_back({id, p.value("minzoom", 0), p.value("maxzoom", 14)});
       auto& names = pack_layers_[id];
       for (const auto& l : p.value("layers", json::array())) {
@@ -424,7 +427,7 @@ void App::apply_layers() {
   const auto want = layers::packs_needed(lstate_, pack_layers_);
   packs_.clear();
   for (const auto& p : all_packs_)
-    if (p.pack.rfind("web-", 0) != 0 || want.count(p.pack)) packs_.push_back(p);
+    if ((p.pack.rfind("web-", 0) != 0 && !is_raster_pack(p.pack)) || want.count(p.pack)) packs_.push_back(p);
 }
 
 void App::open_area(const std::string& id, bool fly) {

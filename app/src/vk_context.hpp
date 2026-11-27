@@ -65,6 +65,10 @@ class Context {
   // Frees after the GPU can no longer be using it (kFramesInFlight frames later).
   void destroy_later(Buffer b);
   void destroy_now(Buffer& b);
+  // Runs `fn` once the GPU can no longer be using what it frees (images, descriptor sets).
+  void destroy_later(std::function<void()> fn);
+  // Frees everything queued by destroy_later now. Only with the device idle.
+  void flush_garbage() { collect_garbage(true); }
   VkShaderModule shader(const uint32_t* spirv, size_t bytes);
 
   void request_rebuild() { rebuild_ = true; }
@@ -108,6 +112,7 @@ class Context {
   struct Garbage {
     Buffer b;
     uint64_t frame;
+    std::function<void()> fn;
   };
   std::vector<Garbage> garbage_;
 };

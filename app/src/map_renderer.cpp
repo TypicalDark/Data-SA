@@ -7,6 +7,8 @@
 
 #include "shaders/map_frag.h"
 #include "shaders/map_vert.h"
+#include "shaders/raster_frag.h"
+#include "shaders/raster_vert.h"
 
 namespace gsa {
 
@@ -22,6 +24,19 @@ struct Push {
   float px;
 };
 static_assert(sizeof(Push) == 32);
+
+struct RasterPush {
+  float origin[2];
+  float k;
+  float alpha;
+  float inv_half[2];
+  float uv0[2];
+  float uvk;
+  float pad[3];
+};
+static_assert(sizeof(RasterPush) == 48);
+constexpr uint32_t kMaxImages = 512;      // descriptor sets for image tiles
+constexpr int kImageUploadsPerFrame = 12;  // spread big jumps over a few frames
 }  // namespace
 
 MapRenderer::MapRenderer(vk::Context& ctx) : ctx_(ctx), text_(ctx) {
@@ -91,13 +106,191 @@ MapRenderer::MapRenderer(vk::Context& ctx) : ctx_(ctx), text_(ctx) {
   vk::check(vkCreateGraphicsPipelines(dev, VK_NULL_HANDLE, 1, &pi, nullptr, &pipeline_), "vkCreateGraphicsPipelines");
   vkDestroyShaderModule(dev, vs, nullptr);
   vkDestroyShaderModule(dev, fs, nullptr);
+  init_raster_pipeline();
+}
+
+void MapRenderer::init_raster_pipeline() {
+  const VkDevice dev = ctx_.device();
+  VkSamplerCreateInfo si{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+  si.magFilter = si.minFilter = VK_FILTER_LINEAR;
+  si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+  si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  si.maxLod = 0;
+  vk::check(vkCreateSampler(dev, &si, nullptr, &raster_sampler_), "vkCreateSampler(raster)");
+
+  VkDescriptorSetLayoutBinding b{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+  VkDescriptorSetLayoutCreateInfo sli{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+  sli.bindingCount = 1;
+  sli.pBindings = &b;
+  vk::check(vkCreateDescriptorSetLayout(dev, &sli, nullptr, &raster_set_layout_), "vkCreateDescriptorSetLayout(raster)");
+  VkDescriptorPoolSize ps{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxImages};
+  VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+  pi.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+  pi.maxSets = kMaxImages;
+  pi.poolSizeCount = 1;
+  pi.pPoolSizes = &ps;
+  vk::check(vkCreateDescriptorPool(dev, &pi, nullptr, &raster_pool_), "vkCreateDescriptorPool(raster)");
+
+  VkShaderModule vs = ctx_.shader(raster_vert, sizeof(raster_vert)), fs = ctx_.shader(raster_frag, sizeof(raster_frag));
+  VkPushConstantRange pr{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(RasterPush)};
+  VkPipelineLayoutCreateInfo li{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+  li.setLayoutCount = 1;
+  li.pSetLayouts = &raster_set_layout_;
+  li.pushConstantRangeCount = 1;
+  li.pPushConstantRanges = &pr;
+  vk::check(vkCreatePipelineLayout(dev, &li, nullptr, &raster_layout_), "vkCreatePipelineLayout(raster)");
+
+  VkPipelineShaderStageCreateInfo st[2]{};
+  st[0] = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vs, "main", nullptr};
+  st[1] = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, fs, "main", nullptr};
+  VkPipelineVertexInputStateCreateInfo vin{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+  VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
+  ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  VkPipelineViewportStateCreateInfo vp{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
+  vp.viewportCount = 1;
+  vp.scissorCount = 1;
+  VkPipelineRasterizationStateCreateInfo rs{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
+  rs.polygonMode = VK_POLYGON_MODE_FILL;
+  rs.cullMode = VK_CULL_MODE_NONE;
+  rs.lineWidth = 1.0f;
+  VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+  ms.rasterizationSamples = ctx_.samples();
+  VkPipelineColorBlendAttachmentState cb{};
+  cb.blendEnable = VK_TRUE;
+  cb.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+  cb.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+  cb.colorBlendOp = VK_BLEND_OP_ADD;
+  cb.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+  cb.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+  cb.alphaBlendOp = VK_BLEND_OP_ADD;
+  cb.colorWriteMask = 0xf;
+  VkPipelineColorBlendStateCreateInfo bs{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
+  bs.attachmentCount = 1;
+  bs.pAttachments = &cb;
+  VkDynamicState dyn[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+  VkPipelineDynamicStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
+  ds.dynamicStateCount = 2;
+  ds.pDynamicStates = dyn;
+  VkGraphicsPipelineCreateInfo gpi{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+  gpi.stageCount = 2;
+  gpi.pStages = st;
+  gpi.pVertexInputState = &vin;
+  gpi.pInputAssemblyState = &ia;
+  gpi.pViewportState = &vp;
+  gpi.pRasterizationState = &rs;
+  gpi.pMultisampleState = &ms;
+  gpi.pColorBlendState = &bs;
+  gpi.pDynamicState = &ds;
+  gpi.layout = raster_layout_;
+  gpi.renderPass = ctx_.render_pass();
+  vk::check(vkCreateGraphicsPipelines(dev, VK_NULL_HANDLE, 1, &gpi, nullptr, &raster_pipeline_),
+            "vkCreateGraphicsPipelines(raster)");
+  vkDestroyShaderModule(dev, vs, nullptr);
+  vkDestroyShaderModule(dev, fs, nullptr);
 }
 
 MapRenderer::~MapRenderer() {
-  vkDeviceWaitIdle(ctx_.device());
-  for (auto& [k, g] : tiles_) ctx_.destroy_now(g.buf);
-  vkDestroyPipeline(ctx_.device(), pipeline_, nullptr);
-  vkDestroyPipelineLayout(ctx_.device(), layout_, nullptr);
+  const VkDevice dev = ctx_.device();
+  vkDeviceWaitIdle(dev);
+  for (auto& [k, g] : tiles_) {
+    ctx_.destroy_now(g.buf);
+    release(g);
+  }
+  ctx_.flush_garbage();  // image tiles queued for release free their sets from the pool below
+  vkDestroyPipeline(dev, raster_pipeline_, nullptr);
+  vkDestroyPipelineLayout(dev, raster_layout_, nullptr);
+  vkDestroyDescriptorPool(dev, raster_pool_, nullptr);
+  vkDestroyDescriptorSetLayout(dev, raster_set_layout_, nullptr);
+  vkDestroySampler(dev, raster_sampler_, nullptr);
+  vkDestroyPipeline(dev, pipeline_, nullptr);
+  vkDestroyPipelineLayout(dev, layout_, nullptr);
+}
+
+void MapRenderer::release(GpuTile& g) {
+  if (!g.img.image) return;
+  const VkDevice dev = ctx_.device();
+  const GpuImage img = g.img;
+  const VkDescriptorPool pool = raster_pool_;
+  ctx_.destroy_later([dev, img, pool] {
+    if (img.set) vkFreeDescriptorSets(dev, pool, 1, &img.set);
+    vkDestroyImageView(dev, img.view, nullptr);
+    vkDestroyImage(dev, img.image, nullptr);
+    vkFreeMemory(dev, img.mem, nullptr);
+  });
+  g.img = {};
+  g.ready = false;
+}
+
+void MapRenderer::upload_image(VkCommandBuffer cmd, GpuTile& g) {
+  const VkDevice dev = ctx_.device();
+  const Raster& r = *g.raster;
+  const VkFormat fmt = VK_FORMAT_R8G8B8A8_UNORM;
+  VkDescriptorSetAllocateInfo dai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+  dai.descriptorPool = raster_pool_;
+  dai.descriptorSetCount = 1;
+  dai.pSetLayouts = &raster_set_layout_;
+  VkDescriptorSet set = VK_NULL_HANDLE;
+  if (vkAllocateDescriptorSets(dev, &dai, &set) != VK_SUCCESS) return;  // pool full: try again after eviction
+
+  GpuImage& im = g.img;
+  im.set = set;
+  VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+  ii.imageType = VK_IMAGE_TYPE_2D;
+  ii.format = fmt;
+  ii.extent = {uint32_t(r.w), uint32_t(r.h), 1};
+  ii.mipLevels = 1;
+  ii.arrayLayers = 1;
+  ii.samples = VK_SAMPLE_COUNT_1_BIT;
+  ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+  ii.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  vk::check(vkCreateImage(dev, &ii, nullptr, &im.image), "vkCreateImage(tile)");
+  VkMemoryRequirements mr;
+  vkGetImageMemoryRequirements(dev, im.image, &mr);
+  VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+  ai.allocationSize = mr.size;
+  ai.memoryTypeIndex = ctx_.memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  vk::check(vkAllocateMemory(dev, &ai, nullptr, &im.mem), "vkAllocateMemory(tile)");
+  vkBindImageMemory(dev, im.image, im.mem, 0);
+  VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+  vi.image = im.image;
+  vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  vi.format = fmt;
+  vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  vk::check(vkCreateImageView(dev, &vi, nullptr, &im.view), "vkCreateImageView(tile)");
+  VkDescriptorImageInfo dii{raster_sampler_, im.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+  VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+  w.dstSet = set;
+  w.descriptorCount = 1;
+  w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  w.pImageInfo = &dii;
+  vkUpdateDescriptorSets(dev, 1, &w, 0, nullptr);
+
+  vk::Buffer staging = ctx_.create_buffer(r.rgba.size(), VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+  std::memcpy(staging.mapped, r.rgba.data(), r.rgba.size());
+  VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+  b.srcAccessMask = 0;
+  b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  b.image = im.image;
+  b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr,
+                       1, &b);
+  VkBufferImageCopy c{};
+  c.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  c.imageExtent = {uint32_t(r.w), uint32_t(r.h), 1};
+  vkCmdCopyBufferToImage(cmd, staging.buf, im.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+  b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0,
+                       nullptr, 1, &b);
+  ctx_.destroy_later(staging);
+  g.ready = true;
+  g.raster.reset();  // the pixels live on the GPU now
 }
 
 void MapRenderer::upload(const TileKey& k, GpuTile& g) {
@@ -128,7 +321,10 @@ void MapRenderer::add(const LoadedTile& t) {
   auto& g = tiles_[t.key];
   g.tile = t.tile;
   g.used = frame_;
-  upload(t.key, g);
+  if (is_raster_pack(t.key.pack)) {
+    release(g);
+    g.raster = t.raster;
+  } else upload(t.key, g);
   if (tiles_.size() > kMaxTiles) {
     // evict the least recently drawn quarter
     std::vector<std::pair<uint64_t, TileKey>> age;
@@ -137,6 +333,7 @@ void MapRenderer::add(const LoadedTile& t) {
     for (size_t i = 0; i < kMaxTiles / 4; ++i) {
       auto it = tiles_.find(age[i].second);
       ctx_.destroy_later(it->second.buf);
+      release(it->second);
       tiles_.erase(it);
     }
   }
@@ -204,6 +401,32 @@ bool MapRenderer::load_fonts(const std::string& dir) {
 void MapRenderer::prepare(const geo::Camera& cam, const std::vector<PackZoom>& packs,
                           const std::vector<text::Rect>& blockers, double dt) {
   keys_ = drawable(cam, packs);
+  // image layers: every screen tile shows its own image, or the matching part of the nearest loaded ancestor
+  raster_draws_.clear();
+  for (const auto& rp : style_.rasters) {
+    auto p = std::find_if(packs.begin(), packs.end(), [&](const PackZoom& z) { return z.pack == rp; });
+    if (p == packs.end()) continue;
+    const float alpha = layers::raster_opacity(rp, cam.zoom);
+    if (alpha <= 0.01f) continue;
+    const int tz = tile_zoom(cam.zoom, *p);
+    for (const auto& id : geo::cover(cam, tz)) {
+      for (auto a = id;; a = a.parent()) {
+        auto it = tiles_.find({rp, a});
+        if (it != tiles_.end() && (it->second.ready || it->second.raster)) {
+          RasterDraw d{{rp, a}, id, 0, 0, 1, alpha};
+          const int dz = id.z - a.z;
+          d.uk = 1.0f / float(1u << dz);
+          d.u0 = float(id.x - (a.x << dz)) * d.uk;
+          d.v0 = float(id.y - (a.y << dz)) * d.uk;
+          raster_draws_.push_back(d);
+          it->second.used = frame_;
+          break;
+        }
+        if (it != tiles_.end()) break;  // the pack has nothing here
+        if (a.z <= p->minzoom) break;
+      }
+    }
+  }
   text_verts_.clear();
   if (atlas_.font_count() == 0) return;
   const int generation = atlas_.generation();
@@ -229,7 +452,16 @@ void MapRenderer::prepare(const geo::Camera& cam, const std::vector<PackZoom>& p
   }
 }
 
-void MapRenderer::upload(VkCommandBuffer cmd) { text_.upload(cmd, atlas_); }
+void MapRenderer::upload(VkCommandBuffer cmd) {
+  text_.upload(cmd, atlas_);
+  int n = 0;
+  for (const auto& d : raster_draws_) {
+    auto& g = tiles_.at(d.src);
+    if (g.ready || !g.raster || g.raster->w <= 0) continue;
+    upload_image(cmd, g);
+    if (++n >= kImageUploadsPerFrame) break;
+  }
+}
 
 void MapRenderer::draw(VkCommandBuffer cmd, const geo::Camera& cam, float dpr) {
   ++frame_;
@@ -245,8 +477,12 @@ void MapRenderer::draw(VkCommandBuffer cmd, const geo::Camera& cam, float dpr) {
   pc.px = dpr;
   const double scale = cam.scale();
 
-  // three passes so borders and symbols always sit above every tile's fills
+  // three passes so borders and symbols always sit above every tile's fills; images go over the fills
   for (int pass = 0; pass < 3; ++pass) {
+    if (pass == 1 && !raster_draws_.empty()) {
+      draw_rasters(cmd, cam, dpr);
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
+    }
     for (const auto& k : keys) {
       auto it = tiles_.find(k);
       if (it == tiles_.end()) continue;
@@ -270,6 +506,33 @@ void MapRenderer::draw(VkCommandBuffer cmd, const geo::Camera& cam, float dpr) {
   }
   text_.draw(cmd, text_verts_, dpr);
   vertices_ += text_verts_.size();
+}
+
+void MapRenderer::draw_rasters(VkCommandBuffer cmd, const geo::Camera& cam, float dpr) {
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, raster_pipeline_);
+  const VkExtent2D ext = ctx_.extent();
+  const double scale = cam.scale();
+  RasterPush pc{};
+  pc.inv_half[0] = 2.0f / float(ext.width);
+  pc.inv_half[1] = 2.0f / float(ext.height);
+  for (const auto& d : raster_draws_) {
+    const auto& g = tiles_.at(d.src);
+    if (!g.ready) continue;
+    double sx, sy;
+    cam.to_screen(d.at.ox(), d.at.oy(), sx, sy);
+    pc.origin[0] = float(sx * dpr);
+    pc.origin[1] = float(sy * dpr);
+    pc.k = float(d.at.size() * scale * dpr);
+    pc.alpha = d.alpha;
+    pc.uv0[0] = d.u0;
+    pc.uv0[1] = d.v0;
+    pc.uvk = d.uk;
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, raster_layout_, 0, 1, &g.img.set, 0, nullptr);
+    vkCmdPushConstants(cmd, raster_layout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                       sizeof(RasterPush), &pc);
+    vkCmdDraw(cmd, 6, 1, 0, 0);
+    vertices_ += 6;
+  }
 }
 
 const map_labels::FeatureRef* MapRenderer::pick_icon(double sx, double sy) const {

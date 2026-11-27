@@ -128,3 +128,34 @@ TEST_CASE("website packs: available layers, packs to fetch, draw order") {
   s.remove("c:ward");
   CHECK(!layers::packs_needed(s, pl).count("web-vote"));
 }
+
+TEST_CASE("image packs: terrain and raster layers") {
+  CHECK(layers::raster_pack("x:fire") == "raster-fire");
+  CHECK(layers::raster_pack("relief") == "raster-relief");
+  CHECK(layers::raster_pack("x:pa").empty());
+  const std::map<std::string, std::vector<std::string>> pl = {
+      {"admin", {"province"}}, {"raster-fire", {}}, {"raster-relief", {}}, {"web-move", {"x_ships"}}, {"raster-ships", {}}};
+  const auto a = layers::available({"admin", "raster-fire", "raster-relief", "web-move", "raster-ships"}, pl);
+  CHECK(a.count("x:fire"));
+  CHECK(a.count("relief"));
+  CHECK(!a.count("x:flood"));
+
+  layers::State s;
+  s.terrain = false;
+  CHECK(layers::packs_needed(s, pl).empty());
+  s.terrain = true;
+  s.add("x:fire");
+  s.add("x:ships");
+  const auto need = layers::packs_needed(s, pl);
+  CHECK(need.count("raster-relief"));
+  CHECK(need.count("raster-fire"));
+  CHECK(need.count("raster-ships"));
+  CHECK(need.count("web-move"));  // ports are vectors in the same layer
+  const auto ms = layers::map_style(s);
+  REQUIRE(ms.rasters.size() == 3);
+  CHECK(ms.rasters[0] == "raster-relief");  // terrain under everything
+  CHECK(ms.rasters[1] == "raster-fire");
+  CHECK(ms.rasters[2] == "raster-ships");   // top of the list draws last
+  CHECK(layers::raster_opacity("raster-fire", 5) > layers::raster_opacity("raster-fire", 12));
+  CHECK(layers::raster_opacity("raster-relief", 12) == 0.0f);  // terrain shading fades out when zoomed in
+}

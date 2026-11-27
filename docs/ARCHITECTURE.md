@@ -56,6 +56,10 @@ that should sync later (saved views, watchlists) will go through the API.
   The website's own layers come from `web-*` packs: the app reads each pack's vector layer names from
   `/v1/packs`, fetches a web pack only while one of its layers is on, and draws areas tinted with an
   edge, lines, and points as small squares in the layer's colour. Clicking one opens a card.
+  Image layers (terrain shading, fire, flood, ships, farm use, rain, solar) come from `raster-*` PNG packs:
+  the loader decodes them with stb_image, `MapRenderer` uploads each as its own texture outside the
+  render pass (a few per frame) and draws textured quads between the fills and the lines at the
+  website's opacities. A missing tile shows the matching part of its nearest loaded parent.
 - **UI (matches the live website, v57).** Dear ImGui in the same render pass after the map, with the
   website's tokens (`ui_theme.hpp`) and drawn line icons (`icons.cpp`): 60 px icon rail, 380 px docked
   sidebar with the search box and command line, the card or panel, and the On the map dock (group tabs,

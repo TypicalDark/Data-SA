@@ -18,7 +18,7 @@ target_include_directories(gsa_stb SYSTEM INTERFACE ${stb_SOURCE_DIR})
 set(GSA_SHADER_OUT ${CMAKE_CURRENT_BINARY_DIR}/gen/shaders)
 file(MAKE_DIRECTORY ${GSA_SHADER_OUT})
 set(GSA_SHADER_HEADERS)
-foreach(shader map text)
+foreach(shader map text raster)
   foreach(stage vert frag)
     set(out ${GSA_SHADER_OUT}/${shader}_${stage}.h)
     add_custom_command(OUTPUT ${out}

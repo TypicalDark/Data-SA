@@ -12,7 +12,8 @@ cards with function strips, the On the map list, breadcrumb and status bar.
 | | |
 |---|---|
 | ![A substation card from the command line: apollo DES](docs/screenshots/card-apollo.png) | ![Find places, with the website's presets](docs/screenshots/find.png) |
-| ![Right-click: what is here](docs/screenshots/spot-cape-town.png) | |
+| ![Right-click: what is here](docs/screenshots/spot-cape-town.png) | ![Solar yield from the website's image pack](docs/screenshots/solar-yield.png) |
+| ![Hazards: fire history and flood-prone land as image tiles](docs/screenshots/hazards.png) | |
 
 ## How it fits together
 
