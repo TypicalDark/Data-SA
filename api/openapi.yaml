@@ -1,0 +1,293 @@
+openapi: 3.1.0
+info:
+  title: Grid of SA API
+  version: "1.0.0"
+  description: |
+    The only interface between the Grid of SA front-end and its back-end.
+
+    The same back-end binary serves this API on a desktop (bound to 127.0.0.1 on a
+    random port, started by the Tauri shell) and on a server (a Linux container).
+    The front-end never reads files or calls any other site; it only calls this API.
+
+    Auth: every route except `/v1/health` needs `Authorization: Bearer <token>`.
+    On desktop the token is a one-time random value made by the shell for each start.
+    On a server it will be a user session token.
+
+    Privacy: no route returns owner names, ID numbers or personal contact details.
+    The data packs never contain them (POPIA rule, see docs/DATA.md).
+servers:
+  - url: http://127.0.0.1:{port}
+    description: Desktop back-end started by the shell
+    variables:
+      port: { default: "7878" }
+security:
+  - bearer: []
+paths:
+  /v1/health:
+    get:
+      operationId: getHealth
+      summary: Liveness check (no auth)
+      security: []
+      responses:
+        "200":
+          description: Back-end is up
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+  /v1/version:
+    get:
+      operationId: getVersion
+      summary: Back-end, API and data versions
+      responses:
+        "200":
+          description: Versions
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Version" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/packs:
+    get:
+      operationId: listPacks
+      summary: Installed data packs
+      responses:
+        "200":
+          description: Installed packs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Pack" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/tilejson/{pack}:
+    get:
+      operationId: getTileJson
+      summary: TileJSON 3.0 for one tile pack
+      parameters:
+        - { $ref: "#/components/parameters/Pack" }
+      responses:
+        "200":
+          description: TileJSON
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TileJson" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/tiles/{pack}/{z}/{x}/{y}:
+    get:
+      operationId: getTile
+      summary: One tile from a PMTiles pack
+      description: |
+        Returns the tile bytes as stored. Vector tiles are Mapbox Vector Tiles, usually
+        gzip-compressed, in which case `Content-Encoding: gzip` is set. A tile that is not
+        in the pack returns 204 with no body, so the map can tell "empty" from "error".
+      parameters:
+        - { $ref: "#/components/parameters/Pack" }
+        - { name: z, in: path, required: true, schema: { type: integer, minimum: 0, maximum: 24 } }
+        - { name: x, in: path, required: true, schema: { type: integer, minimum: 0 } }
+        - name: y
+          in: path
+          required: true
+          description: Tile row; an extension such as `.mvt`, `.pbf` or `.png` is allowed and ignored.
+          schema: { type: string }
+      responses:
+        "200":
+          description: Tile bytes
+          content:
+            application/vnd.mapbox-vector-tile: {}
+            image/png: {}
+            image/webp: {}
+            image/jpeg: {}
+        "204": { description: No tile at this address }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/search:
+    get:
+      operationId: search
+      summary: One search box over places, areas, facilities and plots
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 200 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 12 } }
+      responses:
+        "200":
+          description: Matches, best first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SearchHit" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/areas/{id}:
+    get:
+      operationId: getArea
+      summary: One node of the place tree with its breadcrumb, children and numbers
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Area id, for example `ZA`, `WC`, `WC053`, `W10503001`.
+          schema: { type: string, maxLength: 40 }
+      responses:
+        "200":
+          description: Area
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Area" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/sources:
+    get:
+      operationId: listSources
+      summary: Data sources, licences and credits
+      responses:
+        "200":
+          description: Sources
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Source" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+  parameters:
+    Pack:
+      name: pack
+      in: path
+      required: true
+      description: Pack id, for example `admin`, `grid`, `parcels-wc`.
+      schema: { type: string, pattern: "^[a-z0-9][a-z0-9_-]{0,63}$" }
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing or wrong token
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+    Health:
+      type: object
+      required: [status, uptime_s]
+      properties:
+        status: { type: string, enum: [ok] }
+        uptime_s: { type: integer }
+    Version:
+      type: object
+      required: [api, backend, packs]
+      properties:
+        api: { type: string, description: "API major version, `1`" }
+        backend: { type: string, description: "Back-end semantic version" }
+        pack_schema: { type: array, items: { type: integer }, description: "SQLite pack schema versions this back-end reads" }
+        packs:
+          type: object
+          additionalProperties: { type: string }
+          description: Installed pack id to pack version
+    Pack:
+      type: object
+      required: [id, kind, version, bytes]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [tiles, sqlite] }
+        version: { type: string, description: "Date version such as `admin-2026-11` or `dev`" }
+        bytes: { type: integer }
+        title: { type: string }
+        tile_type: { type: string, enum: [mvt, png, jpeg, webp, avif, unknown] }
+        minzoom: { type: integer }
+        maxzoom: { type: integer }
+        bounds: { type: array, items: { type: number }, minItems: 4, maxItems: 4 }
+        layers:
+          type: array
+          items:
+            type: object
+            required: [id]
+            properties:
+              id: { type: string }
+              minzoom: { type: integer }
+              maxzoom: { type: integer }
+              fields: { type: object, additionalProperties: { type: string } }
+    TileJson:
+      type: object
+      required: [tilejson, tiles]
+      properties:
+        tilejson: { type: string }
+        name: { type: string }
+        tiles: { type: array, items: { type: string } }
+        minzoom: { type: integer }
+        maxzoom: { type: integer }
+        bounds: { type: array, items: { type: number } }
+        center: { type: array, items: { type: number } }
+        vector_layers: { type: array, items: { type: object } }
+    SearchHit:
+      type: object
+      required: [ref, kind, label]
+      properties:
+        ref: { type: string, description: "`area:WC053`, `place:123`, `node:power:42`, `parcel:<sg21>`" }
+        kind: { type: string, description: "Type tag: PROV, DIST, MUNI, WARD, SUBURB, PLACE, SUB, PLANT, PLOT" }
+        label: { type: string }
+        detail: { type: string }
+        lon: { type: number }
+        lat: { type: number }
+    AreaRef:
+      type: object
+      required: [id, level, name, kind]
+      properties:
+        id: { type: string }
+        level: { type: integer }
+        kind: { type: string }
+        name: { type: string }
+    Metric:
+      type: object
+      required: [metric, v]
+      properties:
+        metric: { type: string, description: "For example `pop_est`, `value_median`, `parcels`, `rain_mm_merra2`" }
+        as_of: { type: string }
+        v: { type: number }
+        n: { type: integer, description: "Number of items the value is computed from" }
+        source_id: { type: string }
+    Area:
+      allOf:
+        - $ref: "#/components/schemas/AreaRef"
+        - type: object
+          properties:
+            parent_id: { type: [string, "null"] }
+            bbox: { type: array, items: { type: number }, minItems: 4, maxItems: 4 }
+            center: { type: array, items: { type: number }, minItems: 2, maxItems: 2 }
+            area_km2: { type: [number, "null"] }
+            breadcrumb: { type: array, items: { $ref: "#/components/schemas/AreaRef" } }
+            metrics: { type: array, items: { $ref: "#/components/schemas/Metric" } }
+            children:
+              type: array
+              items:
+                allOf:
+                  - $ref: "#/components/schemas/AreaRef"
+                  - type: object
+                    properties:
+                      metrics:
+                        type: object
+                        additionalProperties: { type: number }
+    Source:
+      type: object
+      required: [source_id, title]
+      properties:
+        source_id: { type: string }
+        title: { type: string }
+        publisher: { type: string }
+        url: { type: string }
+        licence: { type: string }
+        resale_ok: { type: boolean }
+        cadence: { type: string }

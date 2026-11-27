@@ -1,0 +1,122 @@
+#include "mesh.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+
+#include <mapbox/earcut.hpp>
+
+namespace gsa::mesh {
+
+using style::Topic;
+
+void add_polygon(const mvt::Feature& f, uint32_t rgba, std::vector<Vertex>& out) {
+  for (const auto& rings : mvt::group_polygons(f)) {
+    std::vector<std::vector<std::array<float, 2>>> poly;
+    std::vector<const mvt::Point*> flat;
+    for (size_t ri : rings) {
+      auto& ring = poly.emplace_back();
+      const auto& src = f.parts[ri];
+      // earcut wants open rings
+      const size_t n = (src.size() > 1 && src.front().x == src.back().x && src.front().y == src.back().y) ? src.size() - 1
+                                                                                                        : src.size();
+      for (size_t i = 0; i < n; ++i) {
+        ring.push_back({src[i].x, src[i].y});
+        flat.push_back(&src[i]);
+      }
+    }
+    const auto idx = mapbox::earcut<uint32_t>(poly);
+    for (uint32_t i : idx) out.push_back({flat[i]->x, flat[i]->y, 0, 0, rgba, 0});
+  }
+}
+
+void add_line(const mvt::Ring& r, float hw, uint32_t rgba, float minz, bool dashed, std::vector<Vertex>& out) {
+  for (size_t i = 0; i + 1 < r.size(); ++i) {
+    if (dashed && (i % 2)) continue;  // coarse dash: every other segment
+    const float x0 = r[i].x, y0 = r[i].y, x1 = r[i + 1].x, y1 = r[i + 1].y;
+    const float dx = x1 - x0, dy = y1 - y0, len = std::sqrt(dx * dx + dy * dy);
+    if (len <= 0) continue;
+    // the map has no rotation, so a tile-space normal is also the screen-space normal
+    const float nx = -dy / len * hw, ny = dx / len * hw;
+    // extend each segment by half a width so joins have no gaps
+    const float ex = dx / len * hw * 0.5f, ey = dy / len * hw * 0.5f;
+    const Vertex a{x0, y0, nx - ex, ny - ey, rgba, minz}, b{x0, y0, -nx - ex, -ny - ey, rgba, minz};
+    const Vertex c{x1, y1, nx + ex, ny + ey, rgba, minz}, d{x1, y1, -nx + ex, -ny + ey, rgba, minz};
+    out.insert(out.end(), {a, b, c, b, d, c});
+  }
+}
+
+void add_square(float x, float y, float h, uint32_t rgba, float minz, std::vector<Vertex>& out) {
+  const Vertex a{x, y, -h, -h, rgba, minz}, b{x, y, h, -h, rgba, minz}, c{x, y, h, h, rgba, minz}, d{x, y, -h, h, rgba, minz};
+  out.insert(out.end(), {a, b, c, a, c, d});
+}
+
+namespace {
+
+void outline(const mvt::Feature& f, float hw, uint32_t rgba, float minz, std::vector<Vertex>& out) {
+  for (const auto& ring : f.parts) add_line(ring, hw, rgba, minz, false, out);
+}
+
+float kv_minz(double kv) { return kv >= 400 ? 4.0f : kv >= 220 ? 5.0f : kv >= 132 ? 6.0f : 7.0f; }
+
+}  // namespace
+
+void build(const std::string& pack, const mvt::Tile& tile, Topic topic, Mesh& out) {
+  if (pack == "admin") {
+    const uint32_t nodata = style::hex("#232b35").packed();
+    if (const auto* l = tile.layer("municipality")) {
+      for (const auto& f : l->features) {
+        if (f.type != mvt::GeomType::Polygon) continue;
+        const auto c = style::muni_fill(topic, f);
+        add_polygon(f, c ? c->packed() : nodata, out.fill);
+        outline(f, 0.35f, style::muni_border().packed(), 5.2f, out.lines);
+      }
+    }
+    if (const auto* l = tile.layer("province")) {
+      for (const auto& f : l->features)
+        if (f.type == mvt::GeomType::Polygon) outline(f, 0.7f, style::prov_border().packed(), 0, out.lines);
+    }
+    return;
+  }
+  if (pack == "grid") {
+    if (topic != Topic::Energy) return;  // the grid is one topic, never the default
+    if (const auto* l = tile.layer("line")) {
+      for (const auto& f : l->features) {
+        if (f.type != mvt::GeomType::Line) continue;
+        const double kv = f.num("kv").value_or(0);
+        const bool inferred = f.num("inferred").value_or(0) > 0;
+        auto c = inferred ? style::hex("#7d8b97", 0.9f) : style::volt(kv);
+        c.a = uint8_t(c.a * 0.92f);
+        for (const auto& part : f.parts) add_line(part, style::line_width_px(kv, true) * 0.5f, c.packed(), kv_minz(kv), inferred, out.lines);
+      }
+    }
+    if (const auto* l = tile.layer("facility")) {
+      for (const auto& f : l->features) {
+        if (f.type != mvt::GeomType::Point || f.parts.empty()) continue;
+        const bool station = f.str("kind") == "power_station";
+        const double kv = f.num("kv").value_or(0), mw = f.num("mw").value_or(0);
+        const float minz = station ? (mw >= 500 ? 4.0f : mw >= 50 ? 6.0f : 7.5f) : (kv >= 275 ? 5.5f : kv >= 132 ? 7.0f : 8.0f);
+        const float r = station ? float(std::clamp(2.5 + std::sqrt(mw) / 5.0, 3.0, 11.0)) : (kv >= 400 ? 4.6f : kv >= 220 ? 4.0f : 3.2f);
+        const auto fill = station ? style::plant(f.str("fuel")) : style::volt(kv);
+        for (const auto& p : f.parts[0]) {
+          add_square(p.x, p.y, r + 1.2f, style::background().packed(), minz, out.symbols);  // dark halo
+          add_square(p.x, p.y, r, fill.packed(), minz, out.symbols);
+        }
+      }
+    }
+  }
+}
+
+void labels(const mvt::Tile& tile, double ox, double oy, double size, std::vector<Label>& out) {
+  const auto* l = tile.layer("label");
+  if (!l) return;
+  for (const auto& f : l->features) {
+    if (f.type != mvt::GeomType::Point || f.parts.empty() || f.parts[0].empty()) continue;
+    const auto& p = f.parts[0][0];
+    if (p.x < 0 || p.y < 0 || p.x >= 1 || p.y >= 1) continue;  // the neighbour tile owns it
+    const int level = int(f.num("level").value_or(3));
+    out.push_back({f.str("name"), ox + p.x * size, oy + p.y * size, level, level <= 1 ? 3.0f : level <= 3 ? 6.6f : 11.0f});
+  }
+}
+
+}  // namespace gsa::mesh

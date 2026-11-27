@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux (build, tests, headless screenshot)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build libsqlite3-dev zlib1g-dev nlohmann-json3-dev doctest-dev \
+            libvulkan-dev glslang-tools libglfw3-dev mesa-vulkan-drivers xvfb
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGSA_WARNINGS_AS_ERRORS=ON
+      - name: Build
+        run: cmake --build build
+      - name: Tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Screenshot on a software GPU (lavapipe)
+        run: |
+          for t in overview energy elections; do
+            xvfb-run -a -s "-screen 0 1600x1000x24" ./build/app/gsa --size 1600x1000 --topic $t --frames 900 \
+              --screenshot shot-$t.png
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-linux
+          path: shot-*.png
+
+  windows:
+    name: Windows (build, tests, internal build zip)
+    runs-on: windows-2022
+    env:
+      VCPKG_COMMIT: 74e6536215718009aae747d86d84b78376bf9e09
+    steps:
+      - uses: actions/checkout@v4
+      - name: Vulkan SDK
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: 1.3.296.0
+          install_runtime: true
+          cache: true
+          stripdown: true
+      - name: vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT }}
+      - name: Configure
+        shell: pwsh
+        run: >
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-windows
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Tests
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Package internal build
+        shell: pwsh
+        run: |
+          $out = "GridOfSA-internal"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item build/app/Release/* $out -Recurse
+          Copy-Item devdata $out/devdata -Recurse
+          Copy-Item docs/INTERNAL_BUILD.md $out/README.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GridOfSA-internal-windows-x64
+          path: GridOfSA-internal
