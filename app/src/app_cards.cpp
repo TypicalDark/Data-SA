@@ -1009,6 +1009,15 @@ void App::ui_panel_watch() {
     if (st) std::snprintf(d, sizeof d, "%.0f MW", e.value("mw", 0.0));
     else std::snprintf(d, sizeof d, "%.0f kV", e.value("kv", 0.0));
     dl->AddText(font_small_, 11.5f, ImVec2(p.x + 46, p.y + 20), u32(kFaint), d);
+    // in view or off screen, as on the website
+    {
+      double sx, sy;
+      cam_.to_screen(geo::mx(e.value("lon", 0.0)), geo::my(e.value("lat", 0.0)), sx, sy);
+      const bool iv = sx >= side_width() && sx <= cam_.w && sy >= 0 && sy <= cam_.h - kStatusH;
+      const ImVec2 dc(p.x + cw - 40, p.y + 19);
+      if (iv) dl->AddCircleFilled(dc, 4, u32(kAccent));
+      else dl->AddCircle(dc, 4, u32(kFaint), 0, 1.2f);
+    }
     ImGui::SameLine(0, 4);
     const ImVec2 x0 = ImGui::GetCursorScreenPos();
     if (ImGui::InvisibleButton("##del", ImVec2(24, 38))) remove = int(i);
@@ -1019,6 +1028,39 @@ void App::ui_panel_watch() {
   if (remove >= 0) {
     w.erase(size_t(remove));
     save_settings();
+  }
+  if (!w.empty()) {
+    ImGui::Spacing();
+    ImGui::PushFont(font_mono_);
+    if (chip("Fit all", false, ImVec2(80, 26))) {
+      double x0 = 180, y0 = 90, x1 = -180, y1 = -90;
+      for (const auto& e : w) {
+        x0 = std::min(x0, e.value("lon", 0.0));
+        x1 = std::max(x1, e.value("lon", 0.0));
+        y0 = std::min(y0, e.value("lat", 0.0));
+        y1 = std::max(y1, e.value("lat", 0.0));
+      }
+      fly_to_bbox(x0 - 0.05, y0 - 0.05, x1 + 0.05, y1 + 0.05);
+    }
+    ImGui::SameLine(0, 4);
+    if (chip("Export CSV", false, ImVec2(100, 26))) {
+      std::string csv = "name,kind,kv,mw,lat,lon\n";
+      for (const auto& e : w) {
+        std::string n = e.value("name", "");
+        if (n.find_first_of(",\"") != std::string::npos) {
+          std::string q = "\"";
+          for (char ch : n) q += ch == '"' ? std::string("\"\"") : std::string(1, ch);
+          n = q + "\"";
+        }
+        char b[160];
+        std::snprintf(b, sizeof b, ",%s,%.0f,%.0f,%.5f,%.5f\n", e.value("kind", "").c_str(), e.value("kv", 0.0),
+                      e.value("mw", 0.0), e.value("lat", 0.0), e.value("lon", 0.0));
+        csv += n + b;
+      }
+      ImGui::SetClipboardText(csv.c_str());
+      toast(std::to_string(w.size()) + " watched facilities copied as CSV");
+    }
+    ImGui::PopFont();
   }
   ImGui::Spacing();
   ImGui::PushTextWrapPos(0);

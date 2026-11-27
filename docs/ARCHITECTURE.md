@@ -80,7 +80,12 @@ that should sync later (saved views, watchlists) will go through the API.
   airport, port, and which Find conditions the spot fails). Saved views keep the conditions.
 - **Filters** (`layers::Filters`, F3). The website's filter panel: power lines and substations by
   voltage band, power stations by fuel, 2026 ward winners by party, turnout band and province. What
-  fails is dimmed in the mesh and icon passes, or left out with "hide". Filters are saved settings. Each window's rectangle goes to the label
+  fails is dimmed in the mesh and icon passes, or left out with "hide". Filters are saved settings.
+- **Measure** (`measure.cpp`, the website's Measure v2). Path with leg lengths and bearings, area with
+  perimeter, circle with radius, area and circumference; click the last point (or Enter) to finish
+  and the first to close an area; a result pill; copy as text or GeoJSON. Routes along roads and the
+  elevation profile come with Reach. The watchlist shows which watched facilities are in view, fits
+  them all, and exports CSV. Each window's rectangle goes to the label
   engine as a blocker.
 - **Command line** (`commands.cpp`). An UPPERCASE first word or a leading `:` is a command (`GO`, `ADD`,
   `RM`, `HIDE`, `FIND`, `RANK`, `SAVE`, `VIEW` ...); `name CODE` finds the subject and runs the function

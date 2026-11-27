@@ -127,6 +127,20 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
   if (!opt_.lon) cam_.cx -= side_width() / 2 / cam_.scale();  // centre the country in the free map area
   if (!opt_.select.empty()) open_area(opt_.select, !opt_.lon);
   if (opt_.spot) open_spot(opt_.spot->first, opt_.spot->second);
+  if (const auto colon = opt_.measure.find(':'); colon != std::string::npos) {
+    const std::string mode = opt_.measure.substr(0, colon);
+    measure_mode_ = mode == "area" ? measure::Mode::Area : mode == "circle" ? measure::Mode::Circle : measure::Mode::Path;
+    std::vector<double> v;
+    std::string rest = opt_.measure.substr(colon + 1);
+    for (size_t at = 0; at < rest.size();) {
+      const size_t comma = rest.find(',', at);
+      v.push_back(std::atof(rest.substr(at, comma - at).c_str()));
+      at = comma == std::string::npos ? rest.size() : comma + 1;
+    }
+    open_panel(Panel::Measure);
+    for (size_t i = 0; i + 1 < v.size(); i += 2) measure_.push_back({geo::mx(v[i]), geo::my(v[i + 1])});
+    measure_done_ = measure_.size() >= 2;
+  }
   if (!opt_.panel.empty()) {
     const std::string p = opt_.panel;
     if (p == "rank") {
@@ -570,9 +584,36 @@ void App::open_panel(Panel p) {
   panel_ = panel_ == p ? Panel::None : p;
   if (p == Panel::Measure) {
     measuring_ = panel_ == Panel::Measure;
-    if (measuring_) measure_.clear();
+    if (measuring_) measure_reset();
   }
   side_open_ = true;
+}
+
+std::vector<measure::LonLat> App::measure_ll() const {
+  std::vector<measure::LonLat> out;
+  for (const auto& [wx, wy] : measure_) out.push_back({geo::lon_of(wx), geo::lat_of(wy)});
+  return out;
+}
+
+void App::measure_click(double sx, double sy, double wx, double wy) {
+  using measure::Mode;
+  if (measure_done_) measure_reset();
+  // clicking an own point: the first closes an area, the last finishes a path
+  for (size_t i = 0; i < measure_.size(); ++i) {
+    double px, py;
+    cam_.to_screen(measure_[i].first, measure_[i].second, px, py);
+    if (std::hypot(px - sx, py - sy) >= 10) continue;
+    if (measure_mode_ == Mode::Area && i == 0 && measure_.size() >= 3) {
+      measure_done_ = true;
+      return;
+    }
+    if (measure_mode_ != Mode::Circle && i + 1 == measure_.size() && measure_.size() >= 2) {
+      measure_done_ = true;
+      return;
+    }
+  }
+  measure_.push_back({wx, wy});
+  if (measure_mode_ == Mode::Circle && measure_.size() == 2) measure_done_ = true;
 }
 
 void App::close_top() {
@@ -763,7 +804,7 @@ void App::run_fn(const std::string& code) {
   } else if (code == "MEAS") {
     measuring_ = true;
     panel_ = Panel::Measure;
-    measure_.clear();
+    measure_reset();
     if (has_pos) measure_.push_back({geo::mx(lon), geo::my(lat)});
   } else if (code == "WATCH") {
     watch_current();
@@ -955,7 +996,7 @@ void App::handle_input() {
         double wx, wy;
         cam_.to_world(m.x, m.y, wx, wy);
         if (measuring_) {
-          measure_.push_back({wx, wy});
+          measure_click(m.x, m.y, wx, wy);
         } else if (const auto* r = map_->pick_icon(m.x, m.y)) {
           open_facility(*r);
         } else if (const auto h = map_->pick_web(m.x, m.y, cam_)) {
@@ -990,13 +1031,19 @@ void App::handle_input() {
     if (ImGui::IsKeyPressed(ImGuiKey_W, false) && shift) open_panel(Panel::Watch);
     if (ImGui::IsKeyPressed(ImGuiKey_KeypadMultiply, false) || (shift && ImGui::IsKeyPressed(ImGuiKey_8, false))) watch_current();
     if (ImGui::IsKeyPressed(ImGuiKey_F2, false)) catalogue_open_ = !catalogue_open_;
+    if (measuring_ && (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) &&
+        measure_.size() >= 2)
+      measure_done_ = true;
     if (ImGui::IsKeyPressed(ImGuiKey_F3, false)) open_panel(Panel::Filter);
     if (ImGui::IsKeyPressed(ImGuiKey_F4, false)) open_panel(Panel::List);
     if (ImGui::IsKeyPressed(ImGuiKey_F6, false)) open_panel(Panel::Views);
     if (ImGui::IsKeyPressed(ImGuiKey_F7, false)) open_panel(Panel::Measure);
     if (ImGui::IsKeyPressed(ImGuiKey_F1, false)) open_panel(Panel::Keys);
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
-      if (measuring_ && ImGui::IsKeyPressed(ImGuiKey_Backspace, false) && !measure_.empty()) measure_.pop_back();
+      if (measuring_ && ImGui::IsKeyPressed(ImGuiKey_Backspace, false) && !measure_.empty()) {
+        measure_.pop_back();
+        measure_done_ = false;
+      }
       else close_top();
     }
     const double step = 120;

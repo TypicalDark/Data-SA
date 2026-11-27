@@ -17,6 +17,7 @@
 #include "api_client.hpp"
 #include "geo.hpp"
 #include "find.hpp"
+#include "measure.hpp"
 #include "layers.hpp"
 #include "map_renderer.hpp"
 #include "settings.hpp"
@@ -43,6 +44,7 @@ struct AppOptions {
   std::string command;         // a command line to run at start, for example "apollo DES"
   std::optional<double> lon, lat, zoom;
   std::optional<std::pair<double, double>> spot;  // right-click spot to open (lon, lat)
+  std::string measure;  // "area:lon,lat,lon,lat,...": a finished measurement (for screenshots)
   int max_frames = 0;          // quit after this many frames (0 = run until closed)
 };
 
@@ -207,6 +209,14 @@ class App {
 
   bool measuring_ = false;
   std::vector<std::pair<double, double>> measure_;  // world points
+  measure::Mode measure_mode_ = measure::Mode::Path;
+  bool measure_done_ = false;
+  std::vector<measure::LonLat> measure_ll() const;
+  void measure_click(double sx, double sy, double wx, double wy);
+  void measure_reset() {
+    measure_.clear();
+    measure_done_ = false;
+  }
 
   std::string hover_name_;
   std::string toast_;

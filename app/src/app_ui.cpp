@@ -25,19 +25,6 @@ namespace {
 constexpr ImGuiWindowFlags kFixed = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                                     ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoFocusOnAppearing;
 
-double km_between(double lon0, double lat0, double lon1, double lat1) {
-  const double r = geo::kPi / 180, x = (lon1 - lon0) * r * std::cos((lat0 + lat1) / 2 * r), y = (lat1 - lat0) * r;
-  return 6371.0 * std::hypot(x, y);
-}
-
-std::string fmt_km(double km) {
-  char b[32];
-  if (km < 1) std::snprintf(b, sizeof b, "%.0f m", km * 1000);
-  else if (km < 10) std::snprintf(b, sizeof b, "%.2f km", km);
-  else if (km < 100) std::snprintf(b, sizeof b, "%.1f km", km);
-  else std::snprintf(b, sizeof b, "%.0f km", km);
-  return b;
-}
 
 // A flat outlined button like the website's .btn / chips: text centred, accent border when on.
 bool chip(const char* label, bool on, ImVec2 size, bool enabled = true) {
@@ -362,32 +349,71 @@ void App::ui_main(float x, float y, float w, float h) {
           panel_ = Panel::None;
           break;
         }
+        card_head("MEAS", kAccent, "M", "Measure", "", "");
+        using measure::Mode;
         ImGui::PushFont(font_mono_);
-        ImGui::TextColored(col(kMuted), "MEASURE");
+        const float mw = (ImGui::GetContentRegionAvail().x - 12) / 4;
+        const std::pair<Mode, const char*> modes[] = {{Mode::Path, "Path"}, {Mode::Area, "Area"}, {Mode::Circle, "Circle"}};
+        for (const auto& [mo, label] : modes) {
+          if (chip(label, measure_mode_ == mo, ImVec2(mw, 26))) {
+            measure_mode_ = mo;
+            measure_reset();
+          }
+          ImGui::SameLine(0, 4);
+        }
+        chip("Along roads", false, ImVec2(mw, 26), false);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Routes along roads come with Reach (milestone F)");
         ImGui::PopFont();
+        ImGui::Spacing();
+        const auto ll = measure_ll();
         ImGui::PushFont(font_title_);
-        ImGui::TextUnformatted("Measure");
+        if (measure_mode_ == Mode::Path && ll.size() >= 2) ImGui::TextUnformatted(measure::fmt_dist(measure::length(ll)).c_str());
+        if (measure_mode_ == Mode::Area && ll.size() >= 3) ImGui::TextUnformatted(measure::fmt_area(measure::area_m2(ll)).c_str());
+        if (measure_mode_ == Mode::Circle && ll.size() == 2)
+          ImGui::TextUnformatted((measure::fmt_dist(measure::metres(ll[0], ll[1])) + " radius").c_str());
         ImGui::PopFont();
-        ImGui::PushTextWrapPos(0);
-        ImGui::TextColored(col(kMuted), "Click the map to add points. Backspace removes the last one, Esc ends.");
-        ImGui::PopTextWrapPos();
-        double total = 0;
-        for (size_t i = 1; i < measure_.size(); ++i) {
-          const double d = km_between(geo::lon_of(measure_[i - 1].first), geo::lat_of(measure_[i - 1].second),
-                                      geo::lon_of(measure_[i].first), geo::lat_of(measure_[i].second));
-          total += d;
-          kv_row(("Leg " + std::to_string(i)).c_str(), fmt_km(d));
+        if (measure_mode_ == Mode::Path)
+          for (size_t i = 1; i < ll.size(); ++i) {
+            char b[16];
+            std::snprintf(b, sizeof b, "%d\xc2\xb0", int(std::lround(measure::bearing(ll[i - 1], ll[i]))));
+            kv_row((std::to_string(i) + ". " + measure::fmt_dist(measure::metres(ll[i - 1], ll[i]))).c_str(), b);
+          }
+        if (measure_mode_ == Mode::Area && ll.size() >= 3) {
+          auto ring = ll;
+          ring.push_back(ll[0]);
+          ImGui::TextColored(col(kMuted), "Perimeter %s%s", measure::fmt_dist(measure::length(ring)).c_str(),
+                             measure_done_ ? "" : " \xc2\xb7 click the first point to close");
+        }
+        if (measure_mode_ == Mode::Circle && ll.size() == 2) {
+          const double r = measure::metres(ll[0], ll[1]);
+          ImGui::TextColored(col(kMuted), "Area %s \xc2\xb7 circumference %s", measure::fmt_area(3.14159265358979 * r * r).c_str(),
+                             measure::fmt_dist(2 * 3.14159265358979 * r).c_str());
         }
         ImGui::Spacing();
-        ImGui::PushFont(font_head_);
-        ImGui::Text("Total %s", fmt_km(total).c_str());
-        ImGui::PopFont();
-        if (chip("Clear", false, ImVec2(80, 28))) measure_.clear();
-        ImGui::SameLine();
-        if (chip("Copy", false, ImVec2(80, 28))) {
-          glfwSetClipboardString(win_, fmt_km(total).c_str());
-          toast("Copied " + fmt_km(total));
+        ImGui::PushTextWrapPos(0);
+        ImGui::TextColored(col(kFaint), "%s", measure_done_ ? "Click the map to start again." : measure::hint(measure_mode_, ll.size()).c_str());
+        ImGui::TextColored(col(kFaint), "Backspace removes the last point, Esc ends.");
+        ImGui::PopTextWrapPos();
+        ImGui::Spacing();
+        ImGui::PushFont(font_mono_);
+        if (!ll.empty() && chip("Clear", false, ImVec2(70, 26))) measure_reset();
+        if (!measure_done_ && ll.size() >= 2 && measure_mode_ != Mode::Circle) {
+          ImGui::SameLine(0, 4);
+          if (chip("Finish", false, ImVec2(70, 26))) measure_done_ = true;
         }
+        if (measure_done_) {
+          ImGui::SameLine(0, 4);
+          if (chip("Copy", false, ImVec2(70, 26))) {
+            glfwSetClipboardString(win_, measure::summary(measure_mode_, ll).c_str());
+            toast("Copied " + measure::summary(measure_mode_, ll));
+          }
+          ImGui::SameLine(0, 4);
+          if (chip("Copy GeoJSON", false, ImVec2(120, 26))) {
+            glfwSetClipboardString(win_, measure::geojson(measure_mode_, ll).c_str());
+            toast("GeoJSON copied");
+          }
+        }
+        ImGui::PopFont();
         break;
       }
       case Panel::Filter: ui_panel_filter(); break;
@@ -791,38 +817,86 @@ void App::ui_status() {
 }
 
 void App::ui_measure() {
-  if (measure_.empty()) return;
+  if (!measuring_ && measure_.empty()) return;
+  if (!measuring_) return;
+  using measure::Mode;
   auto* dl = ImGui::GetBackgroundDrawList();
-  const ImU32 c = u32(kWarn);
+  const ImU32 ac = IM_COL32(125, 249, 255, 255), soft = IM_COL32(125, 249, 255, 180);
   std::vector<ImVec2> pts;
   for (const auto& [wx, wy] : measure_) {
     double sx, sy;
     cam_.to_screen(wx, wy, sx, sy);
     pts.push_back(ImVec2(float(sx), float(sy)));
   }
-  double total = 0;
-  for (size_t i = 1; i < pts.size(); ++i) {
-    // dashed segment
-    const ImVec2 a = pts[i - 1], b = pts[i];
+  const auto ll = measure_ll();
+  // where the next click would go, while the mouse is over the map
+  const ImVec2 mouse = ImGui::GetIO().MousePos;
+  const bool over_map = !ImGui::GetIO().WantCaptureMouse && mouse.x > side_width() && !measure_done_;
+  auto label = [&](ImVec2 p, const std::string& t, float size) {
+    const ImVec2 ts = font_mono_->CalcTextSizeA(size, FLT_MAX, 0, t.c_str());
+    const ImVec2 a(p.x - ts.x / 2 - 5, p.y - ts.y / 2 - 3), b(p.x + ts.x / 2 + 5, p.y + ts.y / 2 + 3);
+    dl->AddRectFilled(a, b, u32(kGround, 0.85f), 4);
+    dl->AddText(font_mono_, size, ImVec2(a.x + 5, a.y + 3), ac, t.c_str());
+  };
+  auto dashed = [&](ImVec2 a, ImVec2 b, ImU32 c) {
     const float len = std::hypot(b.x - a.x, b.y - a.y);
-    for (float d = 0; d < len; d += 9) {
-      const float e = std::min(len, d + 5);
+    for (float d = 0; d < len; d += 10) {
+      const float e = std::min(len, d + 6);
       dl->AddLine(ImVec2(a.x + (b.x - a.x) * d / len, a.y + (b.y - a.y) * d / len),
                   ImVec2(a.x + (b.x - a.x) * e / len, a.y + (b.y - a.y) * e / len), c, 2);
     }
-    total += km_between(geo::lon_of(measure_[i - 1].first), geo::lat_of(measure_[i - 1].second), geo::lon_of(measure_[i].first),
-                        geo::lat_of(measure_[i].second));
+  };
+  if (measure_mode_ == Mode::Circle) {
+    if (!pts.empty()) {
+      const ImVec2 c = pts[0], e = pts.size() > 1 ? pts[1] : over_map ? mouse : c;
+      const float r = std::hypot(e.x - c.x, e.y - c.y);
+      if (r > 1) {
+        dl->AddCircleFilled(c, r, IM_COL32(125, 249, 255, 36), 96);
+        dl->AddCircle(c, r, ac, 96, 2);
+        dashed(c, e, ac);
+        double wx, wy;
+        cam_.to_world(e.x, e.y, wx, wy);
+        label(ImVec2((c.x + e.x) / 2, (c.y + e.y) / 2 - 12), measure::fmt_dist(measure::metres(ll[0], {geo::lon_of(wx), geo::lat_of(wy)})), 12);
+      }
+    }
+  } else {
+    if (measure_mode_ == Mode::Area && pts.size() >= 2) {
+      auto ring = pts;
+      if (over_map) ring.push_back(mouse);
+      if (ring.size() >= 3) dl->AddConcavePolyFilled(ring.data(), int(ring.size()), IM_COL32(125, 249, 255, 40));
+    }
+    for (size_t i = 1; i < pts.size(); ++i) dl->AddLine(pts[i - 1], pts[i], ac, 2.5f);
+    if (measure_mode_ == Mode::Area && measure_done_ && pts.size() >= 3) dl->AddLine(pts.back(), pts[0], ac, 2.5f);
+    if (over_map && !pts.empty()) {
+      dashed(pts.back(), mouse, soft);
+      if (measure_mode_ == Mode::Area && pts.size() >= 2) dashed(mouse, pts[0], soft);
+    }
+    if (measure_mode_ == Mode::Path) {
+      for (size_t i = 1; i < pts.size(); ++i)
+        label(ImVec2((pts[i - 1].x + pts[i].x) / 2, (pts[i - 1].y + pts[i].y) / 2), measure::fmt_dist(measure::metres(ll[i - 1], ll[i])), 11.5f);
+      if (over_map && !pts.empty()) {
+        double wx, wy;
+        cam_.to_world(mouse.x, mouse.y, wx, wy);
+        auto with = ll;
+        with.push_back({geo::lon_of(wx), geo::lat_of(wy)});
+        label(ImVec2(mouse.x, mouse.y - 18), measure::fmt_dist(measure::length(with)), 12.5f);
+      }
+    }
   }
   for (const auto& p : pts) {
-    dl->AddCircleFilled(p, 4, u32(kGround));
-    dl->AddCircle(p, 4, c, 0, 2);
+    dl->AddCircleFilled(p, 4.5f, u32(kGround));
+    dl->AddCircle(p, 4.5f, ac, 0, 2);
   }
-  if (pts.size() > 1) {
-    const std::string t = "total " + fmt_km(total);
-    const ImVec2 p(pts.back().x + 10, pts.back().y + 8);
-    for (int dx = -1; dx <= 1; ++dx)
-      for (int dy = -1; dy <= 1; ++dy) dl->AddText(font_mono_, 12, ImVec2(p.x + float(dx), p.y + float(dy)), u32(kGround), t.c_str());
-    dl->AddText(font_mono_, 12, p, c, t.c_str());
+  // the result pill under the crumb, as on the website
+  if (!ll.empty() || measuring_) {
+    const std::string t = measure_done_ ? measure::summary(measure_mode_, ll) : measure::hint(measure_mode_, ll.size());
+    const ImVec2 ts = (measure_done_ ? font_head_ : font_small_)->CalcTextSizeA(measure_done_ ? 15.0f : 13.0f, FLT_MAX, 0, t.c_str());
+    const float cx = side_width() + (float(cam_.w) - side_width()) / 2;
+    const ImVec2 a(cx - ts.x / 2 - 14, 58), b(cx + ts.x / 2 + 14, 58 + ts.y + 14);
+    dl->AddRectFilled(a, b, u32(kPanel, 0.95f), 8);
+    dl->AddRect(a, b, u32(kLine), 8);
+    dl->AddText(measure_done_ ? font_head_ : font_small_, measure_done_ ? 15.0f : 13.0f, ImVec2(a.x + 14, a.y + 7),
+                measure_done_ ? ac : u32(kInk), t.c_str());
   }
 }
 
