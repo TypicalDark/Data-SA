@@ -53,6 +53,23 @@ TEST_CASE("layer state: one choropleth, hide, remove, topics") {
   CHECK(layers::map_style(s).fill == style::Topic::Overview);
 
   const auto avail = layers::available({"admin", "grid"});
+  CHECK(!avail.count("streets"));
+  const auto with_base = layers::available({"admin", "base"});
+  CHECK(with_base.count("streets"));
+  CHECK(with_base.count("pois"));
+  {
+    layers::State b;
+    CHECK(layers::map_style(b).roads);
+    CHECK(layers::map_style(b).pois);
+    b.roads = false;
+    CHECK(!layers::map_style(b).roads);
+  }
+  // base map style: motorways sit wider than tracks and tracks come in last
+  CHECK(style::road_half_width(0, false) > style::road_half_width(7, false));
+  CHECK(style::road_minz(7, false) > style::road_minz(0, false));
+  CHECK(style::land_use("park", false).a == 255);
+  CHECK(style::land_use("unknown", false).a == 0);
+  CHECK(style::land_use("unknown", true).a == 255);
   s.set_topic("grid", avail);
   const auto ms = layers::map_style(s);
   CHECK(ms.lines);

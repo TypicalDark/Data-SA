@@ -60,6 +60,11 @@ that should sync later (saved views, watchlists) will go through the API.
   the loader decodes them with stb_image, `MapRenderer` uploads each as its own texture outside the
   render pass (a few per frame) and draws textured quads between the fills and the lines at the
   website's opacities. A missing tile shows the matching part of its nearest loaded parent.
+  The base map comes from the `base` pack, drawn just above the municipalities: land use as fills
+  under the images, roads with casings by class (motorway, major, minor ... tracks, each class from
+  the zoom the website shows it), rail, and in the label pass towns by rank, street names along the
+  roads from zoom 13.3 and landmarks as coloured dots from zoom 14.3 (names from 15.5). The Roads,
+  Names and Landmarks base toggles switch these; the pack is not fetched when all three are off.
 - **UI (matches the live website, v57).** Dear ImGui in the same render pass after the map, with the
   website's tokens (`ui_theme.hpp`) and drawn line icons (`icons.cpp`): 60 px icon rail, 380 px docked
   sidebar with the search box and command line, the card or panel, and the On the map dock (group tabs,

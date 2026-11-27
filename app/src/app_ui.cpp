@@ -593,11 +593,11 @@ void App::ui_dock(float x, float y, float w, float h) {
     bool* v;
     bool ready;
   };
-  Base base[] = {{"Roads", &lstate_.roads, false},
+  Base base[] = {{"Roads", &lstate_.roads, avail_.count("streets") != 0},
                  {"Terrain", &lstate_.terrain, avail_.count("relief") != 0},
                  {"Names", &lstate_.names, true},
                  {"Buildings", &lstate_.buildings, false},
-                 {"Landmarks", &lstate_.landmarks, false}};
+                 {"Landmarks", &lstate_.landmarks, avail_.count("pois") != 0}};
   for (auto& b : base) {
     const float bw = ImGui::CalcTextSize(b.name).x + 14;
     if (chip(b.name, *b.v && b.ready, ImVec2(bw, 24), true)) {
@@ -605,7 +605,8 @@ void App::ui_dock(float x, float y, float w, float h) {
         *b.v = !*b.v;
         apply_layers();
       } else if (b.v == &lstate_.terrain) toast("Terrain needs the relief image pack (raster-relief)");
-      else toast(std::string(b.name) + " come with the base map (milestone E)");
+      else if (b.v == &lstate_.buildings) toast("Buildings come with the buildings pack (milestone E)");
+      else toast(std::string(b.name) + " need the base map pack (base)");
     }
     ImGui::SameLine(0, 5);
   }

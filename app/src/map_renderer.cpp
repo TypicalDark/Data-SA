@@ -299,7 +299,7 @@ void MapRenderer::upload(const TileKey& k, GpuTile& g) {
   g.fill = g.lines = g.symbols = 0;
   if (!g.tile) return;
   mesh::Mesh m;
-  mesh::build(k.pack, *g.tile, style_, m);
+  mesh::build(k.pack, *g.tile, style_, m, k.id.z);
   if (m.vertex_count() == 0) return;
   g.buf = ctx_.create_buffer(m.vertex_count() * sizeof(mesh::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
   auto* dst = static_cast<mesh::Vertex*>(g.buf.mapped);

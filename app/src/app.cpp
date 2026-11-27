@@ -78,7 +78,7 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
       // vector packs, and image packs ("raster-...") as PNG
       if (type != "mvt" && !(type == "png" && is_raster_pack(id))) continue;
       pack_ids.push_back(id);
-      if (id == "admin" || id == "grid" || id.rfind("web-", 0) == 0 || is_raster_pack(id))
+      if (id == "admin" || id == "base" || id == "grid" || id.rfind("web-", 0) == 0 || is_raster_pack(id))
         all_packs_.push_back({id, p.value("minzoom", 0), p.value("maxzoom", 14)});
       auto& names = pack_layers_[id];
       for (const auto& l : p.value("layers", json::array())) {
@@ -86,8 +86,8 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
         else if (l.is_object() && l.contains("id")) names.push_back(l["id"].get<std::string>());
       }
     }
-    // draw order: municipalities at the bottom, website layers, then the grid on top
-    auto rank = [](const std::string& id) { return id == "admin" ? 0 : id == "grid" ? 2 : 1; };
+    // draw order: municipalities at the bottom, the base map, website layers, then the grid on top
+    auto rank = [](const std::string& id) { return id == "admin" ? 0 : id == "base" ? 1 : id == "grid" ? 3 : 2; };
     std::sort(all_packs_.begin(), all_packs_.end(),
               [&](const auto& a, const auto& b) { return rank(a.pack) != rank(b.pack) ? rank(a.pack) < rank(b.pack) : a.pack < b.pack; });
   }
@@ -508,8 +508,11 @@ void App::apply_layers() {
   // only fetch the website packs whose layers are on
   const auto want = layers::packs_needed(lstate_, pack_layers_);
   packs_.clear();
-  for (const auto& p : all_packs_)
+  const bool base = lstate_.roads || lstate_.landmarks || lstate_.names;
+  for (const auto& p : all_packs_) {
+    if (p.pack == "base" && !base) continue;
     if ((p.pack.rfind("web-", 0) != 0 && !is_raster_pack(p.pack)) || want.count(p.pack)) packs_.push_back(p);
+  }
 }
 
 void App::open_area(const std::string& id, bool fly) {

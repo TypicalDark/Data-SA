@@ -59,9 +59,43 @@ void outline(const mvt::Feature& f, float hw, uint32_t rgba, float minz, std::ve
 
 float kv_minz(double kv) { return kv >= 400 ? 4.0f : kv >= 220 ? 5.0f : kv >= 132 ? 6.0f : 7.0f; }
 
+// The website's base map (dark theme): land use under everything, then roads with casings and rail.
+// Tiles below zoom 10 are the overview (main roads only), from 10 the regional tiles (every class).
+void base_map(const mvt::Tile& tile, bool overview, Mesh& out) {
+  if (const auto* l = tile.layer("land")) {
+    for (const auto& f : l->features) {
+      if (f.type != mvt::GeomType::Polygon) continue;
+      const auto c = style::land_use(f.str("c"), overview);
+      if (c.a) add_polygon(f, c.packed(), out.fill);
+    }
+  }
+  if (const auto* l = tile.layer("rail")) {
+    const auto c = style::hex("#55626c", overview ? 0.67f : 1.0f).packed();
+    for (const auto& f : l->features)
+      if (f.type == mvt::GeomType::Line)
+        for (const auto& part : f.parts) add_line(part, overview ? 0.5f : 1.0f, c, 6.5f, false, out.lines);
+  }
+  const auto* l = tile.layer("road");
+  if (!l) return;
+  // casings first, the biggest roads last so they sit on top
+  for (int pass = 0; pass < 2; ++pass) {
+    for (int r = 7; r >= 0; --r) {
+      const auto road = style::road(r, pass == 0);
+      const float hw = style::road_half_width(r, overview) + (pass == 0 ? (overview ? 0.6f : 0.9f) : 0.0f);
+      const float minz = style::road_minz(r, overview);
+      auto c = road;
+      if (overview && pass == 1 && r >= 2) c.a = uint8_t(c.a * (r == 2 ? 0.8f : 0.75f));
+      for (const auto& f : l->features) {
+        if (f.type != mvt::GeomType::Line || int(f.num("r").value_or(7)) != r) continue;
+        for (const auto& part : f.parts) add_line(part, hw, c.packed(), minz, false, out.lines);
+      }
+    }
+  }
+}
+
 }  // namespace
 
-void build(const std::string& pack, const mvt::Tile& tile, const layers::MapStyle& ms, Mesh& out) {
+void build(const std::string& pack, const mvt::Tile& tile, const layers::MapStyle& ms, Mesh& out, int z) {
   if (pack == "admin") {
     const uint32_t nodata = (ms.fill == style::Topic::Overview ? style::land() : style::hex("#16222b")).packed();
     if (const auto* l = tile.layer("municipality")) {
@@ -86,6 +120,10 @@ void build(const std::string& pack, const mvt::Tile& tile, const layers::MapStyl
       for (const auto& f : l->features)
         if (f.type == mvt::GeomType::Polygon) outline(f, 0.7f, style::prov_border().packed(), 0, out.lines);
     }
+    return;
+  }
+  if (pack == "base") {
+    if (ms.roads) base_map(tile, z < 10, out);
     return;
   }
   if (pack.rfind("web-", 0) == 0) {

@@ -56,7 +56,7 @@ struct State {
   std::vector<std::string> on;
   std::set<std::string> hidden;
   std::string focus;
-  bool names = true, roads = true, terrain = true, buildings = false, landmarks = false;
+  bool names = true, roads = true, terrain = true, buildings = false, landmarks = true;
 
   bool shows(const std::string& id) const;  // on and not hidden
   void add(const std::string& id);          // to the top; a choropleth replaces the other one
@@ -123,6 +123,7 @@ struct MapStyle {
   bool muni_borders = true;
   bool lines = false, subs = false, plants = false;
   bool names = true;
+  bool roads = false, pois = false;  // base map: roads, rail and land use; landmarks
   std::vector<Extra> extra;  // website layers, bottom first
   std::vector<std::string> rasters;  // image packs to draw over the fills, bottom first
   // Find: municipalities that meet every condition stay lit and the rest go dark
@@ -131,7 +132,7 @@ struct MapStyle {
   Filters filter;
   bool operator==(const MapStyle& o) const {
     return fill == o.fill && muni_borders == o.muni_borders && lines == o.lines && subs == o.subs && plants == o.plants &&
-           names == o.names && extra == o.extra && rasters == o.rasters && find_on == o.find_on && find_pass == o.find_pass && filter == o.filter;
+           names == o.names && roads == o.roads && pois == o.pois && extra == o.extra && rasters == o.rasters && find_on == o.find_on && find_pass == o.find_pass && filter == o.filter;
   }
   bool operator!=(const MapStyle& o) const { return !(*this == o); }
 };

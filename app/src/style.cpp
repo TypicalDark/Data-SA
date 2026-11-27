@@ -1,5 +1,6 @@
 #include "style.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <map>
 
@@ -137,6 +138,45 @@ Legend legend(Topic t) {
     default: break;
   }
   return l;
+}
+
+Rgba land_use(const std::string& c, bool overview) {
+  static const std::pair<const char*, const char*> lu[] = {
+      {"res", "#111c24"},  {"ind", "#171a24"},  {"mil", "#171a24"}, {"com", "#1d171d"}, {"park", "#10221a"},
+      {"pitch", "#10221a"}, {"nat", "#0f1e17"}, {"wood", "#0e2115"}, {"edu", "#1c1c15"}, {"hosp", "#231619"},
+      {"air", "#171a21"},  {"cem", "#121d13"},  {"beach", "#232114"}, {"wet", "#0f2020"}};
+  for (const auto& [k, v] : lu)
+    if (c == k) return hex(v);
+  return overview ? hex("#0f1e17") : Rgba{0, 0, 0, 0};
+}
+
+Rgba road(int r, bool casing) {
+  if (r == 0) return hex(casing ? "#33261a" : "#5b4630");
+  if (r <= 2) return hex(casing ? "#1f261c" : "#3a4636");
+  return hex(casing ? "#111a21" : "#1d2b35");
+}
+
+float road_half_width(int r, bool overview) {
+  static const float ov[] = {1.0f, 0.85f, 0.65f, 0.5f};
+  static const float rg[] = {2.2f, 1.9f, 1.6f, 1.35f, 1.1f, 0.9f, 0.7f, 0.5f};
+  if (overview) return ov[std::clamp(r, 0, 3)];
+  return rg[std::clamp(r, 0, 7)];
+}
+
+float road_minz(int r, bool overview) {
+  // overview: main roads from 6.5, class 3 from 7.5; regional classes as the website's stiles minZ
+  static const float rg[] = {10, 10, 10, 10, 10, 11, 12.5f, 14};
+  if (overview) return r <= 2 ? 7.2f : 8.2f;
+  return rg[std::clamp(r, 0, 7)] + 0.3f;
+}
+
+Rgba poi(const std::string& k) {
+  if (k == "hospital" || k == "clinic") return hex("#e05a5a");
+  if (k == "school" || k == "university" || k == "college" || k == "library") return hex("#e2b84a");
+  if (k == "police" || k == "fire_station" || k == "townhall") return hex("#6f9fd8");
+  if (k == "supermarket" || k == "fuel") return hex("#fe9f6d");
+  if (k == "station" || k == "aerodrome") return hex("#9fb3c8");
+  return hex("#b48ce0");  // museum, place of worship
 }
 
 }  // namespace gsa::style

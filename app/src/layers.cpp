@@ -300,6 +300,7 @@ std::set<std::string> available(const std::vector<std::string>& packs, const std
   for (const auto& p : packs) {
     if (p == "admin") a.insert({"munis", "c:pop", "c:val", "c:muni"});
     if (p == "grid") a.insert({"lines", "subs", "plants"});
+    if (p == "base") a.insert({"streets", "pois"});
   }
   std::set<std::string> names;
   for (const auto& [pack, ls] : pack_layers)
@@ -334,6 +335,8 @@ MapStyle map_style(const State& s) {
   m.subs = s.shows("subs");
   m.plants = s.shows("plants");
   m.names = s.names;
+  m.roads = s.roads;
+  m.pois = s.landmarks;
   if (s.terrain) m.rasters.push_back("raster-relief");
   // website layers, bottom of the list first so the top of the list draws last
   for (auto it = s.on.rbegin(); it != s.on.rend(); ++it) {
