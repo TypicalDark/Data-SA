@@ -51,7 +51,8 @@ landmarks and small places, with minor road classes starting at 11, 12 and 14 as
 
 `tools/webpack/build_parcels_pack.py` builds the `parcels` pack from the project's parcel files: the
 national SG cadastre per municipality, the newer KZN copy, and the Joburg and Ekurhuleni metro stands
-(which replace SG plots with the same `sg21`), joined to the valuation rolls by `sg21`. No source has
+(which replace SG plots with the same `sg21`), joined to the valuation rolls by `sg21`, with the KZN
+COGTA valuation layers filling KZN plots the rolls miss (3.49M of 9.12M plots carry a value, 762 MB). No source has
 owner names or ID numbers, and the roll `unit` column is never joined.
 
 ## Development pack
