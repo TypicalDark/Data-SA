@@ -78,6 +78,54 @@ void build(const std::string& pack, const mvt::Tile& tile, const layers::MapStyl
     }
     return;
   }
+  if (pack.rfind("web-", 0) == 0) {
+    // website layers: areas tinted with an outline, lines, and points as small squares
+    for (const auto& e : ms.extra) {
+      const auto* l = tile.layer(e.layer);
+      if (!l) continue;
+      style::Rgba base;
+      base.r = uint8_t(e.rgba & 0xff);
+      base.g = uint8_t(e.rgba >> 8 & 0xff);
+      base.b = uint8_t(e.rgba >> 16 & 0xff);
+      base.a = 255;
+      auto with_alpha = [](style::Rgba c, float a) {
+        c.a = uint8_t(std::clamp(a, 0.0f, 1.0f) * 255);
+        return c.packed();
+      };
+      for (const auto& f : l->features) {
+        switch (f.type) {
+          case mvt::GeomType::Polygon: {
+            if (e.mode == layers::Extra::Outline) {
+              outline(f, 0.45f, with_alpha(base, 0.8f), 0, out.lines);
+            } else if (e.mode == layers::Extra::Party) {
+              add_polygon(f, style::party(f.str("party"), 0.8f).packed(), out.fill);
+              outline(f, 0.3f, style::hex("#0b161d", 0.6f).packed(), 8.0f, out.lines);
+            } else {
+              add_polygon(f, with_alpha(base, 0.26f), out.fill);
+              outline(f, 0.5f, with_alpha(base, 0.85f), 7.0f, out.lines);  // edges once zoomed in
+            }
+            break;
+          }
+          case mvt::GeomType::Line: {
+            // flight routes are many long arcs: keep them faint so the country stays readable
+            const bool faint = e.layer == "x_flights";
+            for (const auto& part : f.parts) add_line(part, faint ? 0.5f : 0.8f, with_alpha(base, faint ? 0.35f : 0.9f), 0, false, out.lines);
+            break;
+          }
+          case mvt::GeomType::Point:
+            for (const auto& part : f.parts)
+              for (const auto& p : part) {
+                if (p.x < 0 || p.y < 0 || p.x >= 1 || p.y >= 1) continue;
+                add_square(p.x, p.y, 3.2f, style::hex("#070d12", 0.9f).packed(), 0, out.symbols);
+                add_square(p.x, p.y, 2.2f, base.packed(), 0, out.symbols);
+              }
+            break;
+          default: break;
+        }
+      }
+    }
+    return;
+  }
   if (pack == "grid") {
     if (!ms.lines) return;  // facilities draw as icons in the text pass
     if (const auto* l = tile.layer("line")) {

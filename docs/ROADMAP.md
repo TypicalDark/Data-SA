@@ -28,7 +28,7 @@ seven milestones across the steps above:
 | | Milestone | Status |
 |---|---|---|
 | A | Shell like the website: rail, docked sidebar, search and command line, cards with function strips, On the map dock, catalogue, breadcrumb, status bar, spot card, saved views, watchlist, measure | first cut done |
-| B | Website data as desktop packs (all 71 layers, find grid) built from the project data store | |
+| B | Website data as desktop packs (all 71 layers, find grid) built from the project data store | vector layers done: `tools/webpack`, nine `web-*` packs, generic drawing, click cards; raster layers wait for E |
 | C | Find with distance conditions and party, Rank, Filter, full spot summary | |
 | D | TR, FAIL, FEED, PATH on the grid network | |
 | E | Base map: roads, land use, buildings, terrain, 3D, plots, themes | |

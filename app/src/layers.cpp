@@ -216,13 +216,43 @@ int State::count_in(const std::string& g) const {
   return n;
 }
 
-std::set<std::string> available(const std::vector<std::string>& packs) {
+std::string mvt_name(const std::string& id) {
+  std::string n = id;
+  std::replace(n.begin(), n.end(), ':', '_');
+  return n;
+}
+
+namespace {
+// layers drawn by the built-in admin and grid code, not as website extras
+bool builtin(const std::string& id) {
+  return id == "munis" || id == "labels" || id == "lines" || id == "subs" || id == "plants" || is_choropleth(id);
+}
+}  // namespace
+
+std::set<std::string> available(const std::vector<std::string>& packs, const std::map<std::string, std::vector<std::string>>& pack_layers) {
   std::set<std::string> a = {"labels"};
   for (const auto& p : packs) {
     if (p == "admin") a.insert({"munis", "c:pop", "c:val", "c:muni"});
     if (p == "grid") a.insert({"lines", "subs", "plants"});
   }
+  std::set<std::string> names;
+  for (const auto& [pack, ls] : pack_layers)
+    if (pack.rfind("web-", 0) == 0) names.insert(ls.begin(), ls.end());
+  for (const auto& d : catalogue())
+    if (names.count(mvt_name(d.id))) a.insert(d.id);
+  if (names.count("wards")) a.insert("c:ward");
   return a;
+}
+
+std::set<std::string> packs_needed(const State& s, const std::map<std::string, std::vector<std::string>>& pack_layers) {
+  std::set<std::string> want;
+  for (const auto& id : s.on) {
+    if (!s.shows(id)) continue;
+    const std::string n = id == "c:ward" ? "wards" : mvt_name(id);
+    for (const auto& [pack, ls] : pack_layers)
+      if (pack.rfind("web-", 0) == 0 && std::find(ls.begin(), ls.end(), n) != ls.end()) want.insert(pack);
+  }
+  return want;
 }
 
 MapStyle map_style(const State& s) {
@@ -235,6 +265,24 @@ MapStyle map_style(const State& s) {
   m.subs = s.shows("subs");
   m.plants = s.shows("plants");
   m.names = s.names;
+  // website layers, bottom of the list first so the top of the list draws last
+  for (auto it = s.on.rbegin(); it != s.on.rend(); ++it) {
+    const std::string& id = *it;
+    if (!s.shows(id)) continue;
+    if (id == "c:ward") {
+      m.extra.push_back({Extra::Party, "wards", Swatch::Fill, 0});
+      continue;
+    }
+    if (builtin(id)) continue;
+    const Def* d = find(id);
+    if (!d) continue;
+    Extra e;
+    e.layer = mvt_name(id);
+    e.swatch = d->swatch;
+    e.rgba = style::hex(d->colour).packed();
+    if (id == "wards") e.mode = Extra::Outline;
+    m.extra.push_back(e);
+  }
   return m;
 }
 

@@ -119,6 +119,7 @@ class App {
   void apply_layers();
   void open_area(const std::string& id, bool fly = true);
   void open_facility(const map_labels::FeatureRef& r);
+  void open_web(const MapRenderer::WebHit& h);
   void open_spot(double lon, double lat);
   void open_panel(Panel p);
   void close_top();
@@ -160,7 +161,9 @@ class App {
   std::optional<Fly> fly_;
   bool dragging_ = false, drag_moved_ = false;
   double drag_x_ = 0, drag_y_ = 0;
-  std::vector<PackZoom> packs_;
+  std::vector<PackZoom> packs_;      // tile packs drawn now: admin, the web packs in use, grid
+  std::vector<PackZoom> all_packs_;  // every vector tile pack the back-end serves
+  std::map<std::string, std::vector<std::string>> pack_layers_;  // pack id -> vector layer names
   nlohmann::json version_;
   std::string backend_error_;
 

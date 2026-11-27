@@ -3,6 +3,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "geo.hpp"
@@ -54,6 +55,13 @@ class MapRenderer {
   const std::vector<map_labels::FeatureRef>& drawn_facilities() const { return picks_; }
   // Municipality / province feature under a world point, from loaded admin tiles.
   const mvt::Feature* pick(double wx, double wy, const std::string& layer, double zoom) const;
+  // The top website-layer feature under a screen point (points and lines within a few pixels).
+  struct WebHit {
+    const mvt::Feature* feature = nullptr;
+    std::string layer;
+    double wx = 0, wy = 0;  // world position of the feature (point) or of the click
+  };
+  std::optional<WebHit> pick_web(double sx, double sy, const geo::Camera& cam) const;
   size_t tile_count() const { return tiles_.size(); }
   size_t vertex_count() const { return vertices_; }
 

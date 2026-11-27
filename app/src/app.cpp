@@ -75,11 +75,20 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
       if (p.value("kind", "") != "tiles" || p.value("tile_type", "") != "mvt") continue;
       const std::string id = p["id"];
       pack_ids.push_back(id);
-      if (id == "admin" || id == "grid") packs_.push_back({id, p.value("minzoom", 0), p.value("maxzoom", 14)});
+      if (id == "admin" || id == "grid" || id.rfind("web-", 0) == 0)
+        all_packs_.push_back({id, p.value("minzoom", 0), p.value("maxzoom", 14)});
+      auto& names = pack_layers_[id];
+      for (const auto& l : p.value("layers", json::array())) {
+        if (l.is_string()) names.push_back(l.get<std::string>());
+        else if (l.is_object() && l.contains("id")) names.push_back(l["id"].get<std::string>());
+      }
     }
-    std::sort(packs_.begin(), packs_.end(), [](const auto& a, const auto& b) { return a.pack < b.pack; });
+    // draw order: municipalities at the bottom, website layers, then the grid on top
+    auto rank = [](const std::string& id) { return id == "admin" ? 0 : id == "grid" ? 2 : 1; };
+    std::sort(all_packs_.begin(), all_packs_.end(),
+              [&](const auto& a, const auto& b) { return rank(a.pack) != rank(b.pack) ? rank(a.pack) < rank(b.pack) : a.pack < b.pack; });
   }
-  avail_ = layers::available(pack_ids);
+  avail_ = layers::available(pack_ids, pack_layers_);
 
   const auto& sd = settings_->data();
   side_open_ = sd.value("side_open", true);
@@ -409,7 +418,14 @@ void App::set_topic(const std::string& id) {
   apply_layers();
 }
 
-void App::apply_layers() { map_->set_style(layers::map_style(lstate_)); }
+void App::apply_layers() {
+  map_->set_style(layers::map_style(lstate_));
+  // only fetch the website packs whose layers are on
+  const auto want = layers::packs_needed(lstate_, pack_layers_);
+  packs_.clear();
+  for (const auto& p : all_packs_)
+    if (p.pack.rfind("web-", 0) != 0 || want.count(p.pack)) packs_.push_back(p);
+}
 
 void App::open_area(const std::string& id, bool fly) {
   Card c;
@@ -442,6 +458,26 @@ void App::open_facility(const map_labels::FeatureRef& r) {
     else if (const auto* i = std::get_if<int64_t>(&v)) c.props[k] = *i;
     else if (const auto* b = std::get_if<bool>(&v)) c.props[k] = *b;
   }
+  if (cards_.back().kind == Card::Facility && cards_.back().id == c.id) return;
+  cards_.push_back(c);
+  panel_ = Panel::None;
+  side_open_ = true;
+}
+
+void App::open_web(const MapRenderer::WebHit& h) {
+  const auto& f = *h.feature;
+  Card c;
+  c.kind = Card::Facility;
+  c.lon = geo::lon_of(h.wx);
+  c.lat = geo::lat_of(h.wy);
+  for (const auto& [k, v] : f.props) {
+    if (const auto* s = std::get_if<std::string>(&v)) c.props[k] = *s;
+    else if (const auto* d = std::get_if<double>(&v)) c.props[k] = *d;
+    else if (const auto* i = std::get_if<int64_t>(&v)) c.props[k] = *i;
+    else if (const auto* b = std::get_if<bool>(&v)) c.props[k] = *b;
+  }
+  c.props["layer"] = h.layer;
+  c.id = h.layer + ":" + c.props.value("name", std::string()) + ":" + std::to_string(c.lon) + std::to_string(c.lat);
   if (cards_.back().kind == Card::Facility && cards_.back().id == c.id) return;
   cards_.push_back(c);
   panel_ = Panel::None;
@@ -792,6 +828,9 @@ void App::handle_input() {
     if (const auto* r = map_->pick_icon(m.x, m.y)) {
       hover_name_ = r->feature().str("name");
       ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    } else if (const auto h = map_->pick_web(m.x, m.y, cam_)) {
+      hover_name_ = h->feature->str("name");
+      if (hover_name_.empty()) hover_name_ = h->feature->str("detail");
     } else {
       const auto* f = map_->pick(wx, wy, "municipality", cam_.zoom);
       hover_name_ = f ? f->str("name") : "";
@@ -820,6 +859,8 @@ void App::handle_input() {
           measure_.push_back({wx, wy});
         } else if (const auto* r = map_->pick_icon(m.x, m.y)) {
           open_facility(*r);
+        } else if (const auto h = map_->pick_web(m.x, m.y, cam_)) {
+          open_web(*h);
         } else if (const auto* f = map_->pick(wx, wy, "municipality", cam_.zoom)) {
           open_area(f->str("id"), false);
         }

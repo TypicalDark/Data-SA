@@ -4,6 +4,7 @@
 // when the data packs carry it; the rest list as "needs a data pack" until their pack ships.
 #pragma once
 
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -66,8 +67,24 @@ struct State {
   int count_in(const std::string& group_id) const;
 };
 
-// Which layers the current packs can draw. `packs` are tile pack ids ("admin", "grid").
-std::set<std::string> available(const std::vector<std::string>& packs);
+// The vector layer name a website layer has in the packs: ":" becomes "_" (x:pa -> x_pa).
+std::string mvt_name(const std::string& id);
+
+// Which layers the installed packs can draw. `packs` are tile pack ids ("admin", "grid",
+// "web-water" ...); `pack_layers` the vector layers each pack holds (from /v1/packs).
+std::set<std::string> available(const std::vector<std::string>& packs,
+                                const std::map<std::string, std::vector<std::string>>& pack_layers = {});
+// The website-layer packs ("web-...") that hold a layer the state shows.
+std::set<std::string> packs_needed(const State& s, const std::map<std::string, std::vector<std::string>>& pack_layers);
+
+// A website layer drawn from a web pack.
+struct Extra {
+  enum Mode { Auto, Outline, Party } mode = Auto;
+  std::string layer;  // vector layer name in the pack
+  Swatch swatch = Swatch::Fill;
+  uint32_t rgba = 0;
+  bool operator==(const Extra& o) const { return mode == o.mode && layer == o.layer && swatch == o.swatch && rgba == o.rgba; }
+};
 
 // How the renderer and labels should draw, derived from State.
 struct MapStyle {
@@ -75,9 +92,10 @@ struct MapStyle {
   bool muni_borders = true;
   bool lines = false, subs = false, plants = false;
   bool names = true;
+  std::vector<Extra> extra;  // website layers, bottom first
   bool operator==(const MapStyle& o) const {
     return fill == o.fill && muni_borders == o.muni_borders && lines == o.lines && subs == o.subs && plants == o.plants &&
-           names == o.names;
+           names == o.names && extra == o.extra;
   }
   bool operator!=(const MapStyle& o) const { return !(*this == o); }
 };

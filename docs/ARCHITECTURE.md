@@ -53,6 +53,9 @@ that should sync later (saved views, watchlists) will go through the API.
   topics on keys 1 to 0 (`layers.cpp`). A topic fills the On the map list; any layer can be added, hidden
   or removed; one choropleth colours the municipalities at a time. `layers::map_style` turns that list
   into what the renderer and labels draw. Layers whose pack is not installed are listed as needing it.
+  The website's own layers come from `web-*` packs: the app reads each pack's vector layer names from
+  `/v1/packs`, fetches a web pack only while one of its layers is on, and draws areas tinted with an
+  edge, lines, and points as small squares in the layer's colour. Clicking one opens a card.
 - **UI (matches the live website, v57).** Dear ImGui in the same render pass after the map, with the
   website's tokens (`ui_theme.hpp`) and drawn line icons (`icons.cpp`): 60 px icon rail, 380 px docked
   sidebar with the search box and command line, the card or panel, and the On the map dock (group tabs,

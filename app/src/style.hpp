@@ -42,6 +42,7 @@ Rgba accent();
 
 Rgba volt(double kv);               // power line / substation colour by voltage
 Rgba plant(const std::string& fuel);
+Rgba party(const std::string& short_name, float alpha = 1.0f);  // ANC, DA, ... Other
 float line_width_px(double kv, bool focus);
 bool line_visible(double kv, double zoom);  // readable-zoom gates from the prototype
 

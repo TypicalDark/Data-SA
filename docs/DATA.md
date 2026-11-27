@@ -12,6 +12,7 @@ exports.
 | `grid` | PMTiles, MVT | `export_tiles.py --pack grid` | line, facility |
 | `parcels`, `parcels-<prov>` | PMTiles, MVT | `export_tiles.py --pack parcels` | parcel |
 | `h3`, `places` | PMTiles, MVT | `export_tiles.py` | hex, place |
+| `web-grid`, `web-water`, `web-risk`, `web-nature`, `web-vote`, `web-prop`, `web-land`, `web-places`, `web-move` | PMTiles, MVT | `tools/webpack/build_web_packs.py` | the website map's layers, one vector layer per website layer id (`x:pa` is `x_pa`) |
 | `pack` | SQLite, `gsa-pack/1` | `export_pack.py` | tree, metric, parcel, valuation, node, edge, series, value, source, snapshot, search (FTS5), pack_info |
 
 ## Privacy (POPIA)
@@ -22,6 +23,14 @@ exports.
   personal build, each row citing its roll.
 - `source.resale_ok` marks what may go into a paid build; roll values and sale prices are not resellable
   without municipal licences, so a paid build shows suburb aggregates instead.
+
+## Website packs
+
+`tools/webpack/build_web_packs.py` turns the website map's published `data/` files into nine
+`web-*.pmtiles` packs (about 160 MB together), so the app draws the same layers as the website until
+the data store exports them directly. Every feature carries `name` and `detail` plus a few numbers.
+Rights holders on mining rights, business phone numbers and anything naming a private person are left
+out. Raster layers (fire, flood, solar yield, rain grids, hillshade) are not in these packs yet.
 
 ## Development pack
 

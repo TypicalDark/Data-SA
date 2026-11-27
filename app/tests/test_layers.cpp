@@ -2,6 +2,7 @@
 #include <doctest/doctest.h>
 
 #include <filesystem>
+#include <map>
 #include <set>
 
 #include "commands.hpp"
@@ -95,4 +96,35 @@ TEST_CASE("settings round trip") {
   REQUIRE(again.data().contains("views"));
   CHECK(again.data()["views"][0]["name"] == "Home");
   std::filesystem::remove_all(std::filesystem::path(path).parent_path());
+}
+
+TEST_CASE("website packs: available layers, packs to fetch, draw order") {
+  const std::map<std::string, std::vector<std::string>> pl = {
+      {"admin", {"province", "municipality", "label"}},
+      {"web-nature", {"x_pa", "x_wetl"}},
+      {"web-vote", {"wards"}},
+  };
+  const auto a = layers::available({"admin", "web-nature", "web-vote"}, pl);
+  CHECK(a.count("x:pa"));
+  CHECK(a.count("x:wetl"));
+  CHECK(a.count("wards"));
+  CHECK(a.count("c:ward"));
+  CHECK(!a.count("x:cba"));
+  CHECK(layers::mvt_name("x:pa") == "x_pa");
+
+  layers::State s;
+  s.add("x:wetl");
+  s.add("x:pa");  // top of the list
+  s.add("c:ward");
+  auto need = layers::packs_needed(s, pl);
+  CHECK(need.count("web-nature"));
+  CHECK(need.count("web-vote"));
+  const auto ms = layers::map_style(s);
+  REQUIRE(ms.extra.size() == 3);
+  CHECK(ms.extra.back().mode == layers::Extra::Party);  // c:ward was added last, so it is on top
+  CHECK(ms.extra[0].layer == "x_wetl");               // bottom of the list draws first
+  s.toggle_hidden("x:pa");
+  CHECK(layers::map_style(s).extra.size() == 2);
+  s.remove("c:ward");
+  CHECK(!layers::packs_needed(s, pl).count("web-vote"));
 }

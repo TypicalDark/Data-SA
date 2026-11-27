@@ -63,6 +63,11 @@ std::optional<Rgba> muni_fill(Topic t, const mvt::Feature& f) {
   }
 }
 
+Rgba party(const std::string& n, float a) {
+  auto it = kParty.find(n);
+  return hex(it != kParty.end() ? it->second : kParty.at("Other"), a);
+}
+
 Rgba land() { return hex("#0d171e"); }
 Rgba background() { return hex("#070d12"); }
 Rgba muni_border() { return hex("#6f8a9c", 0.55f); }

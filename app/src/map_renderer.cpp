@@ -295,4 +295,61 @@ const mvt::Feature* MapRenderer::pick(double wx, double wy, const std::string& l
   return nullptr;
 }
 
+std::optional<MapRenderer::WebHit> MapRenderer::pick_web(double sx, double sy, const geo::Camera& cam) const {
+  double wx, wy;
+  cam.to_world(sx, sy, wx, wy);
+  if (wx < 0 || wy < 0 || wx >= 1 || wy >= 1) return std::nullopt;
+  const double scale = cam.scale();
+  for (auto e = style_.extra.rbegin(); e != style_.extra.rend(); ++e) {
+    // the most detailed drawn tile that holds the point
+    const TileKey* best = nullptr;
+    for (const auto& k : keys_) {
+      if (k.pack.rfind("web-", 0) != 0) continue;
+      const double n = double(1u << k.id.z);
+      if (uint32_t(wx * n) != k.id.x || uint32_t(wy * n) != k.id.y) continue;
+      auto it = tiles_.find(k);
+      if (it == tiles_.end() || !it->second.tile || !it->second.tile->layer(e->layer)) continue;
+      if (!best || k.id.z > best->id.z) best = &k;
+    }
+    if (!best) continue;
+    const auto& tile = *tiles_.at(*best).tile;
+    const double n = double(1u << best->id.z);
+    const float tx = float(wx * n - best->id.x), ty = float(wy * n - best->id.y);
+    const float tol = float(7.0 / (best->id.size() * scale));
+    const mvt::Feature* hit = nullptr;
+    float best_d = tol;
+    double hx = wx, hy = wy;
+    for (const auto& f : tile.layer(e->layer)->features) {
+      if (f.type == mvt::GeomType::Polygon) {
+        if (!hit && mvt::point_in_polygon(f, tx, ty)) hit = &f;
+      } else if (f.type == mvt::GeomType::Point) {
+        for (const auto& part : f.parts)
+          for (const auto& p : part) {
+            const float d = std::hypot(p.x - tx, p.y - ty);
+            if (d < best_d) {
+              best_d = d;
+              hit = &f;
+              hx = (best->id.x + double(p.x)) / n;
+              hy = (best->id.y + double(p.y)) / n;
+            }
+          }
+      } else if (f.type == mvt::GeomType::Line) {
+        for (const auto& part : f.parts)
+          for (size_t i = 0; i + 1 < part.size(); ++i) {
+            const float ax = part[i].x, ay = part[i].y, bx = part[i + 1].x, by = part[i + 1].y;
+            const float dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+            const float t = l2 > 0 ? std::clamp(((tx - ax) * dx + (ty - ay) * dy) / l2, 0.0f, 1.0f) : 0.0f;
+            const float d = std::hypot(ax + t * dx - tx, ay + t * dy - ty);
+            if (d < best_d) {
+              best_d = d;
+              hit = &f;
+            }
+          }
+      }
+    }
+    if (hit) return WebHit{hit, e->layer, hx, hy};
+  }
+  return std::nullopt;
+}
+
 }  // namespace gsa

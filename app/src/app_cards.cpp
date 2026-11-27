@@ -351,6 +351,32 @@ void App::ui_facility(Card& c) {
     return;
   }
   const json& p = c.props;
+  if (p.contains("layer")) {
+    // a feature of a website layer: tag from its group, kind from the layer
+    std::string lid = p["layer"].get<std::string>();
+    const layers::Def* d = nullptr;
+    for (const auto& x : layers::catalogue())
+      if (layers::mvt_name(x.id) == lid) d = &x;
+    if (lid == "wards") d = layers::find("wards");
+    const auto* g = d ? layers::group(d->group) : nullptr;
+    std::string tag = g ? upper(g->name) : "LAYER";
+    if (tag.size() > 6) tag = tag.substr(0, 5);
+    card_head(tag.c_str(), g ? g->colour : kAccent, d ? upper(d->name).c_str() : lid.c_str(), p.value("name", d ? d->name : "Feature"),
+              p.value("detail", std::string()), d ? d->about : "");
+    fn_strip({"HERE", "NEAR", "REACH", "MEAS", "GO", "COPY", "PNG"});
+    char ll[64];
+    std::snprintf(ll, sizeof ll, "%.5f, %.5f", c.lat, c.lon);
+    kv_row("Position", ll);
+    std::string prov;
+    const std::string muni = muni_name_at(geo::mx(c.lon), geo::my(c.lat), &prov);
+    if (!muni.empty()) kv_row("Municipality", muni);
+    static const std::set<std::string> skip = {"name", "detail", "layer"};
+    for (const auto& [k, v] : p.items()) {
+      if (skip.count(k)) continue;
+      kv_row(k.c_str(), prop_text(v));
+    }
+    return;
+  }
   const std::string kind = p.value("kind", std::string());
   const bool station = kind == "power_station" || p.value("tag", "") == "PLANT";
   const double kv = p.contains("kv") && p["kv"].is_number() ? p["kv"].get<double>() : 0;
