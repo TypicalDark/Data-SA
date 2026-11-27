@@ -27,7 +27,8 @@ class MapRenderer {
   explicit MapRenderer(vk::Context& ctx);
   ~MapRenderer();
 
-  void set_topic(style::Topic t);
+  void set_style(const layers::MapStyle& s);
+  const layers::MapStyle& map_style() const { return style_; }
   void add(const LoadedTile& t);
   bool has(const TileKey& k) const { return tiles_.count(k) != 0; }
 
@@ -47,6 +48,10 @@ class MapRenderer {
 
   bool labels_animating() const { return engine_.animating(); }
   size_t labels_placed() const { return engine_.placed(); }
+  // The facility icon under a screen point (logical pixels), from the last prepare().
+  const map_labels::FeatureRef* pick_icon(double sx, double sy) const;
+  // Facilities drawn in the last frame (for lists and ranking).
+  const std::vector<map_labels::FeatureRef>& drawn_facilities() const { return picks_; }
   // Municipality / province feature under a world point, from loaded admin tiles.
   const mvt::Feature* pick(double wx, double wy, const std::string& layer, double zoom) const;
   size_t tile_count() const { return tiles_.size(); }
@@ -66,7 +71,8 @@ class MapRenderer {
   vk::Context& ctx_;
   VkPipelineLayout layout_ = VK_NULL_HANDLE;
   VkPipeline pipeline_ = VK_NULL_HANDLE;
-  style::Topic topic_ = style::Topic::Overview;
+  layers::MapStyle style_;
+  std::vector<map_labels::FeatureRef> picks_;
   std::map<TileKey, GpuTile> tiles_;
   std::vector<TileKey> keys_;  // drawn this frame, from prepare()
   text::Atlas atlas_;

@@ -3,7 +3,11 @@
 
 #include <string>
 
+#include <memory>
+#include <vector>
+
 #include "geo.hpp"
+#include "layers.hpp"
 #include "mvt.hpp"
 #include "style.hpp"
 #include "text/labels.hpp"
@@ -15,20 +19,30 @@ struct Fonts {
 };
 
 // One drawn tile: where it sits on screen (logical pixels).
+// A feature an icon stands for, kept so a click can open its card.
+struct FeatureRef {
+  std::shared_ptr<const mvt::Tile> tile;
+  std::string layer;
+  size_t index = 0;
+  double wx = 0, wy = 0;  // world position
+  const mvt::Feature& feature() const;
+};
+
 struct TileOnScreen {
-  const mvt::Tile* tile = nullptr;
+  std::shared_ptr<const mvt::Tile> tile;
   std::string pack;
   geo::TileId id;
   double ox = 0, oy = 0;  // screen position of the tile's top-left corner
   double k = 0;           // screen pixels per tile unit
+  std::vector<FeatureRef>* picks = nullptr;  // facility icons register here
 };
 
 // Zoom fade used by every layer: 0 below minz - 0.7, 1 from minz.
 float fade(double zoom, double minz);
 
 // Adds the candidates of one tile. Province and municipality names come from the admin pack;
-// in the Energy topic, power stations and substations become icons with names and the main
-// lines carry their voltage along the line.
-void collect(const TileOnScreen& t, style::Topic topic, double zoom, const Fonts& fonts, text::Engine& engine);
+// power stations and substations become icons with names, and the main lines carry their
+// voltage along the line, when those layers are on.
+void collect(const TileOnScreen& t, const layers::MapStyle& ms, double zoom, const Fonts& fonts, text::Engine& engine);
 
 }  // namespace gsa::map_labels

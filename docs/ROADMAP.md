@@ -20,4 +20,19 @@ release is personal and carries all data, plot values included.
 | 13 | Signing (Azure Trusted Signing), installer, release pipeline to R2 | 1 | |
 | 14 | Server dry run: Linux container on R2 packs | 0.5 | |
 
+## Matching the website (from 27 Nov 2026)
+
+The user asked for the desktop app to correspond with the live website map (v57). That work runs as
+seven milestones across the steps above:
+
+| | Milestone | Status |
+|---|---|---|
+| A | Shell like the website: rail, docked sidebar, search and command line, cards with function strips, On the map dock, catalogue, breadcrumb, status bar, spot card, saved views, watchlist, measure | first cut done |
+| B | Website data as desktop packs (all 71 layers, find grid) built from the project data store | |
+| C | Find with distance conditions and party, Rank, Filter, full spot summary | |
+| D | TR, FAIL, FEED, PATH on the grid network | |
+| E | Base map: roads, land use, buildings, terrain, 3D, plots, themes | |
+| F | Reach, Analyse, live feeds | |
+| G | Updates, signing, installer (needs the code-signing account and hosting) | |
+
 A usable internal Windows build exists from PR 1 on (CI artifact `GridOfSA-internal-windows-x64`).

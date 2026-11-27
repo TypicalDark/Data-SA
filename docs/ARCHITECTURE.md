@@ -48,13 +48,26 @@ that should sync later (saved views, watchlists) will go through the API.
   in priority order on a collision grid, keeps them out of every interface window, fades them in
   and out over 0.2 s, and bends line labels along their line (upright, no sharp turns, one repeat
   per 420 px). Icons always draw and text steps around them, right of the icon first, then left.
-- **Topics.** The seven topics of the v7 design (Overview, People, Property, Water, Energy and grid,
-  Elections, Transport). Changing topic re-colours cached tiles without refetching. The grid draws only
-  in its own topic, never by default.
-- **UI.** Dear ImGui drawn in the same render pass after the map: topic switcher, search with type
-  tags, one left panel with a back stack (topic home, area card with breadcrumb, facts, function strip,
-  children list), key bottom right, status bar. Each window's rectangle goes to the label engine as a
-  blocker.
+- **Layers and topics (website parity).** The website's catalogue: 71 layers in nine groups (Power,
+  Water, Farms, Nature, Places, Travel, Votes, Property, Hazards) plus five base toggles, and its ten
+  topics on keys 1 to 0 (`layers.cpp`). A topic fills the On the map list; any layer can be added, hidden
+  or removed; one choropleth colours the municipalities at a time. `layers::map_style` turns that list
+  into what the renderer and labels draw. Layers whose pack is not installed are listed as needing it.
+- **UI (matches the live website, v57).** Dear ImGui in the same render pass after the map, with the
+  website's tokens (`ui_theme.hpp`) and drawn line icons (`icons.cpp`): 60 px icon rail, 380 px docked
+  sidebar with the search box and command line, the card or panel, and the On the map dock (group tabs,
+  eye and remove buttons, legend under the colour layer, base toggles); layer catalogue (F2); breadcrumb
+  pill; 3D, zoom and home buttons; status bar. Cards carry a type tag, title, data line and a function
+  strip (DES, HERE, NEAR, TR, FAIL, FEED, PATH, REACH, MEAS, WATCH, GO, COPY, PNG; unbuilt ones are shown
+  greyed). Panels: Find with the website's presets, Rank and List of what is in view, Areas, saved Views,
+  Watchlist, Keys, Measure. Right-click opens a spot card. Each window's rectangle goes to the label
+  engine as a blocker.
+- **Command line** (`commands.cpp`). An UPPERCASE first word or a leading `:` is a command (`GO`, `ADD`,
+  `RM`, `HIDE`, `FIND`, `RANK`, `SAVE`, `VIEW` ...); `name CODE` finds the subject and runs the function
+  on it (`apollo DES`); anything else searches.
+- **Settings** (`settings.cpp`). Saved views, watchlist, sidebar and topic in
+  `%APPDATA%\GridOfSA\settings.json` (or `~/.config/GridOfSA`), written atomically. Scripted runs never
+  touch it.
 - **Shell role.** With no `--api`, `gsa` starts `gsa-backend` from its own folder on a random port with
   a random 256-bit token, waits for the ready line, and stops it on exit. On Windows a job object kills
   the back-end even if the app crashes.

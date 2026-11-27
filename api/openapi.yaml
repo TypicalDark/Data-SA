@@ -277,6 +277,13 @@ components:
                   - $ref: "#/components/schemas/AreaRef"
                   - type: object
                     properties:
+                      center:
+                        type: array
+                        description: Label point [lon, lat]
+                        items: { type: number }
+                        minItems: 2
+                        maxItems: 2
+                      area_km2: { type: number }
                       metrics:
                         type: object
                         additionalProperties: { type: number }

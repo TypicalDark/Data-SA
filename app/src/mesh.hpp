@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "mvt.hpp"
+#include "layers.hpp"
 #include "style.hpp"
 
 namespace gsa::mesh {
@@ -33,7 +34,7 @@ struct Label {
 };
 
 // Appends geometry of one tile to `out`. `pack` is the tile pack id ("admin", "grid").
-void build(const std::string& pack, const mvt::Tile& tile, style::Topic topic, Mesh& out);
+void build(const std::string& pack, const mvt::Tile& tile, const layers::MapStyle& ms, Mesh& out);
 
 // Label points of an admin tile, in world units. tile_ox/oy/size place the tile in the world.
 void labels(const mvt::Tile& tile, double tile_ox, double tile_oy, double tile_size, std::vector<Label>& out);

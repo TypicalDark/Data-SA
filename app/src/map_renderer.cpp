@@ -106,7 +106,7 @@ void MapRenderer::upload(const TileKey& k, GpuTile& g) {
   g.fill = g.lines = g.symbols = 0;
   if (!g.tile) return;
   mesh::Mesh m;
-  mesh::build(k.pack, *g.tile, topic_, m);
+  mesh::build(k.pack, *g.tile, style_, m);
   if (m.vertex_count() == 0) return;
   g.buf = ctx_.create_buffer(m.vertex_count() * sizeof(mesh::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
   auto* dst = static_cast<mesh::Vertex*>(g.buf.mapped);
@@ -118,9 +118,9 @@ void MapRenderer::upload(const TileKey& k, GpuTile& g) {
   g.symbols = uint32_t(m.symbols.size());
 }
 
-void MapRenderer::set_topic(style::Topic t) {
-  if (t == topic_) return;
-  topic_ = t;
+void MapRenderer::set_style(const layers::MapStyle& s) {
+  if (s == style_) return;
+  style_ = s;
   for (auto& [k, g] : tiles_) upload(k, g);
 }
 
@@ -209,17 +209,19 @@ void MapRenderer::prepare(const geo::Camera& cam, const std::vector<PackZoom>& p
   const int generation = atlas_.generation();
   for (int attempt = 0; attempt < 2; ++attempt) {
     engine_.begin(float(cam.w), float(cam.h), blockers);
+    picks_.clear();
     const double scale = cam.scale();
     for (const auto& k : keys_) {
       const auto& g = tiles_.at(k);
       if (!g.tile) continue;
       map_labels::TileOnScreen t;
-      t.tile = g.tile.get();
+      t.tile = g.tile;
+      t.picks = &picks_;
       t.pack = k.pack;
       t.id = k.id;
       cam.to_screen(k.id.ox(), k.id.oy(), t.ox, t.oy);
       t.k = k.id.size() * scale;
-      map_labels::collect(t, topic_, cam.zoom, fonts_, engine_);
+      map_labels::collect(t, style_, cam.zoom, fonts_, engine_);
     }
     engine_.finish(dt, text_verts_);
     // the atlas filled up and was cleared mid-frame: lay out once more against the new atlas
@@ -268,6 +270,11 @@ void MapRenderer::draw(VkCommandBuffer cmd, const geo::Camera& cam, float dpr) {
   }
   text_.draw(cmd, text_verts_, dpr);
   vertices_ += text_verts_.size();
+}
+
+const map_labels::FeatureRef* MapRenderer::pick_icon(double sx, double sy) const {
+  const int i = engine_.hit(float(sx), float(sy));
+  return i >= 0 && size_t(i) < picks_.size() ? &picks_[size_t(i)] : nullptr;
 }
 
 const mvt::Feature* MapRenderer::pick(double wx, double wy, const std::string& layer, double zoom) const {

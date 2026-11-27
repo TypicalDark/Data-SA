@@ -32,7 +32,7 @@ endforeach()
 add_custom_target(gsa_shaders DEPENDS ${GSA_SHADER_HEADERS})
 
 # Everything but main and the window, so tests can link it without a GPU.
-add_library(gsa_app_core STATIC src/mvt.cpp src/mesh.cpp src/style.cpp src/api_client.cpp src/tiles.cpp src/backend_process.cpp
+add_library(gsa_app_core STATIC src/mvt.cpp src/mesh.cpp src/style.cpp src/api_client.cpp src/tiles.cpp src/backend_process.cpp src/layers.cpp src/commands.cpp src/settings.cpp
   src/text/atlas.cpp src/text/labels.cpp src/map_labels.cpp)
 target_include_directories(gsa_app_core PUBLIC src)
 target_link_libraries(gsa_app_core PUBLIC gsa_common nlohmann_json::nlohmann_json httplib::httplib protozero::protozero
@@ -42,7 +42,7 @@ if(WIN32)
 endif()
 gsa_warnings(gsa_app_core)
 
-add_executable(gsa WIN32 src/main.cpp src/app.cpp src/vk_context.cpp src/map_renderer.cpp src/text_renderer.cpp)
+add_executable(gsa WIN32 src/main.cpp src/app.cpp src/app_ui.cpp src/app_cards.cpp src/icons.cpp src/vk_context.cpp src/map_renderer.cpp src/text_renderer.cpp)
 if(NOT WIN32)
   set_target_properties(gsa PROPERTIES WIN32_EXECUTABLE OFF)
 endif()
@@ -68,7 +68,7 @@ install(TARGETS gsa RUNTIME DESTINATION bin)
 install(DIRECTORY assets DESTINATION bin)
 
 if(GSA_BUILD_TESTS)
-  add_executable(gsa_app_tests tests/main.cpp tests/test_mvt_mesh.cpp tests/test_geo.cpp tests/test_text.cpp)
+  add_executable(gsa_app_tests tests/main.cpp tests/test_mvt_mesh.cpp tests/test_geo.cpp tests/test_text.cpp tests/test_layers.cpp)
   target_link_libraries(gsa_app_tests PRIVATE gsa_app_core doctest::doctest)
   target_compile_definitions(gsa_app_tests PRIVATE GSA_DEVDATA="${PROJECT_SOURCE_DIR}/devdata"
                              GSA_ASSETS="${CMAKE_CURRENT_SOURCE_DIR}/assets")

@@ -4,6 +4,7 @@
 
 #include "api_client.hpp"
 #include "backend_process.hpp"
+#include "layers.hpp"
 #include "mesh.hpp"
 #include "mvt.hpp"
 
@@ -51,7 +52,9 @@ TEST_CASE("back-end process, API client, MVT decode and meshing end to end") {
   REQUIRE(tile.layer("province") != nullptr);
 
   mesh::Mesh m;
-  mesh::build("admin", tile, style::Topic::People, m);
+  layers::MapStyle people;
+  people.fill = style::Topic::People;
+  mesh::build("admin", tile, people, m);
   CHECK(m.fill.size() > 1000);
   CHECK(m.fill.size() % 3 == 0);
   CHECK(m.lines.size() > 1000);
@@ -62,10 +65,12 @@ TEST_CASE("back-end process, API client, MVT decode and meshing end to end") {
   auto g = c.tile("grid", 5, 18, 18);
   REQUIRE(g.status == 200);
   mesh::Mesh gm;
-  mesh::build("grid", mvt::decode(g.body), style::Topic::Energy, gm);
+  layers::MapStyle grid;
+  grid.lines = true;
+  mesh::build("grid", mvt::decode(g.body), grid, gm);
   CHECK(gm.lines.size() > 100);
   mesh::Mesh none;
-  mesh::build("grid", mvt::decode(g.body), style::Topic::People, none);
+  mesh::build("grid", mvt::decode(g.body), people, none);
   CHECK(none.vertex_count() == 0);  // the grid is only drawn in its own topic
 
   const auto hits = c.search("cape town", 5);

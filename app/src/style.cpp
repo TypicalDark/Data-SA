@@ -63,11 +63,11 @@ std::optional<Rgba> muni_fill(Topic t, const mvt::Feature& f) {
   }
 }
 
-Rgba land() { return hex("#121820"); }
-Rgba background() { return hex("#0b0f13"); }
-Rgba muni_border() { return hex("#36414d", 0.8f); }
-Rgba prov_border() { return hex("#6b7886", 0.9f); }
-Rgba accent() { return hex("#35d0f0"); }
+Rgba land() { return hex("#0d171e"); }
+Rgba background() { return hex("#070d12"); }
+Rgba muni_border() { return hex("#6f8a9c", 0.55f); }
+Rgba prov_border() { return hex("#a3b9c8", 0.75f); }
+Rgba accent() { return hex("#7df9ff"); }
 
 Rgba volt(double kv) {
   if (kv >= 400) return hex("#b0207e");

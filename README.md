@@ -4,12 +4,15 @@ A desktop map of South Africa: power grid, water, people, property values, elect
 down to the plot. Native C++ with its own Vulkan renderer, and a back-end service that can move from
 your PC to a server without changes.
 
-![Overview](docs/screenshots/overview.png)
+The interface follows the live website map: icon rail, docked sidebar with search and command line,
+cards with function strips, the On the map list, breadcrumb and status bar.
+
+![Power and grid](docs/screenshots/grid.png)
 
 | | |
 |---|---|
-| ![Energy and grid, Gauteng](docs/screenshots/energy-gauteng.png) | ![Elections, KwaZulu-Natal](docs/screenshots/elections-kzn.png) |
-| ![Energy and grid, Cape Town: names and voltages along the lines](docs/screenshots/energy-cape-town.png) | ![Property, Gauteng](docs/screenshots/property-gauteng.png) |
+| ![A substation card from the command line: apollo DES](docs/screenshots/card-apollo.png) | ![Find places, with the website's presets](docs/screenshots/find.png) |
+| ![Right-click: what is here](docs/screenshots/spot-cape-town.png) | |
 
 ## How it fits together
 

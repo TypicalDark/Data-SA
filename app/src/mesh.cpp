@@ -61,13 +61,13 @@ float kv_minz(double kv) { return kv >= 400 ? 4.0f : kv >= 220 ? 5.0f : kv >= 13
 
 }  // namespace
 
-void build(const std::string& pack, const mvt::Tile& tile, Topic topic, Mesh& out) {
+void build(const std::string& pack, const mvt::Tile& tile, const layers::MapStyle& ms, Mesh& out) {
   if (pack == "admin") {
-    const uint32_t nodata = style::hex("#232b35").packed();
+    const uint32_t nodata = (ms.fill == style::Topic::Overview ? style::land() : style::hex("#16222b")).packed();
     if (const auto* l = tile.layer("municipality")) {
       for (const auto& f : l->features) {
         if (f.type != mvt::GeomType::Polygon) continue;
-        const auto c = style::muni_fill(topic, f);
+        const auto c = style::muni_fill(ms.fill, f);
         add_polygon(f, c ? c->packed() : nodata, out.fill);
         outline(f, 0.35f, style::muni_border().packed(), 5.2f, out.lines);
       }
@@ -79,7 +79,7 @@ void build(const std::string& pack, const mvt::Tile& tile, Topic topic, Mesh& ou
     return;
   }
   if (pack == "grid") {
-    if (topic != Topic::Energy) return;  // the grid is one topic, never the default
+    if (!ms.lines) return;  // facilities draw as icons in the text pass
     if (const auto* l = tile.layer("line")) {
       for (const auto& f : l->features) {
         if (f.type != mvt::GeomType::Line) continue;

@@ -47,15 +47,17 @@ void admin(const TileOnScreen& t, double zoom, const Fonts& fonts, text::Engine&
   }
 }
 
-void grid(const TileOnScreen& t, double zoom, const Fonts& fonts, text::Engine& engine) {
+void grid(const TileOnScreen& t, const layers::MapStyle& ms, double zoom, const Fonts& fonts, text::Engine& engine) {
   const uint32_t bg = style::background().packed();
   const uint32_t halo = style::hex("#0b0f13", 0.92f).packed();
-  if (const auto* l = t.tile->layer("facility")) {
-    for (const auto& f : l->features) {
+  if (const auto* l = t.tile->layer("facility"); l && (ms.subs || ms.plants)) {
+    for (size_t fi = 0; fi < l->features.size(); ++fi) {
+      const auto& f = l->features[fi];
       if (f.type != mvt::GeomType::Point || f.parts.empty() || f.parts[0].empty()) continue;
       const auto& p = f.parts[0][0];
       if (!owns(p)) continue;
       const bool station = f.str("kind") == "power_station";
+      if (station ? !ms.plants : !ms.subs) continue;
       const double kv = f.num("kv").value_or(0), mw = f.num("mw").value_or(0);
       const double minz = station ? (mw >= 500 ? 4.0 : mw >= 50 ? 6.0 : 7.5) : (kv >= 275 ? 5.5 : kv >= 132 ? 7.0 : 8.0);
       const float opacity = fade(zoom, minz);
@@ -78,11 +80,16 @@ void grid(const TileOnScreen& t, double zoom, const Fonts& fonts, text::Engine& 
         if (station && mw > 0) c.text += "  " + std::to_string(int(std::lround(mw))) + " MW";
       }
       c.style = {fonts.regular, 11.5f, style::hex("#aab6c2").packed(), halo, 1.5f, 0};
+      if (t.picks) {
+        c.pick = int(t.picks->size());
+        const double n = double(1u << t.id.z);
+        t.picks->push_back({t.tile, "facility", fi, (double(t.id.x) + double(p.x)) / n, (double(t.id.y) + double(p.y)) / n});
+      }
       c.priority = kFacility + (station ? int(std::max(0.0, 20 - std::sqrt(mw) / 3)) : int(std::max(0.0, 25 - kv / 20)));
       engine.add(std::move(c));
     }
   }
-  if (const auto* l = t.tile->layer("line")) {
+  if (const auto* l = t.tile->layer("line"); l && ms.lines) {
     const text::Rect owner{float(t.ox), float(t.oy), float(t.ox + t.k), float(t.oy + t.k)};
     int fi = 0;
     for (const auto& f : l->features) {
@@ -116,10 +123,12 @@ void grid(const TileOnScreen& t, double zoom, const Fonts& fonts, text::Engine& 
 
 }  // namespace
 
-void collect(const TileOnScreen& t, Topic topic, double zoom, const Fonts& fonts, text::Engine& engine) {
+const mvt::Feature& FeatureRef::feature() const { return tile->layer(layer)->features.at(index); }
+
+void collect(const TileOnScreen& t, const layers::MapStyle& ms, double zoom, const Fonts& fonts, text::Engine& engine) {
   if (!t.tile) return;
-  if (t.pack == "admin") admin(t, zoom, fonts, engine);
-  if (t.pack == "grid" && topic == Topic::Energy) grid(t, zoom, fonts, engine);
+  if (t.pack == "admin" && ms.names) admin(t, zoom, fonts, engine);
+  if (t.pack == "grid") grid(t, ms, zoom, fonts, engine);
 }
 
 }  // namespace gsa::map_labels

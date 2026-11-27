@@ -102,6 +102,7 @@ void Engine::begin(float w, float h, const std::vector<Rect>& blockers) {
   points_.clear();
   lines_.clear();
   line_anchors_.clear();
+  hits_.clear();
   index_.reset(w, h);
   ++frame_;
 }
@@ -261,7 +262,10 @@ void Engine::finish(double dt, std::vector<Vertex>& out) {
         ++placed_;
       }
       const float a = l.text.empty() ? 0 : step(l.key, text_ok, dt);
-      if (icon_ok && l.icon) emit_point(l, run, tx, ty, 0, false, true, icons);
+      if (icon_ok && l.icon) {
+        emit_point(l, run, tx, ty, 0, false, true, icons);
+        if (l.pick >= 0) hits_.push_back({icon_box, l.pick});
+      }
       if (!l.text.empty()) emit_point(l, run, tx, ty, a, true, false, out);
       continue;
     }
@@ -334,6 +338,14 @@ void Engine::finish(double dt, std::vector<Vertex>& out) {
   // forget labels that left the view
   for (auto it = fades_.begin(); it != fades_.end();)
     it = it->second.seen + 2 < frame_ ? fades_.erase(it) : std::next(it);
+}
+
+int Engine::hit(float x, float y, float slop) const {
+  for (auto it = hits_.rbegin(); it != hits_.rend(); ++it) {
+    const Rect& r = it->first;
+    if (x >= r.x0 - slop && x <= r.x1 + slop && y >= r.y0 - slop && y <= r.y1 + slop) return it->second;
+  }
+  return -1;
 }
 
 }  // namespace gsa::text

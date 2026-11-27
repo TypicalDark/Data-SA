@@ -112,8 +112,11 @@ void handle_area(const Ctx& ctx, const std::string& id, httplib::Response& res) 
 
   std::map<std::string, json> kids;
   std::vector<std::string> order;
-  db->query("SELECT area_id, level, name FROM tree WHERE parent_id = ? ORDER BY name", {id}, [&](const sql::Row& r) {
+  db->query("SELECT area_id, level, name, lon, lat, area_km2 FROM tree WHERE parent_id = ? ORDER BY name", {id},
+            [&](const sql::Row& r) {
     auto c = area_ref(r.text(0), int(r.i64(1)), r.text(2));
+    if (!r.is_null(3)) c["center"] = {r.f64(3), r.f64(4)};
+    if (!r.is_null(5)) c["area_km2"] = r.f64(5);
     c["metrics"] = json::object();
     order.push_back(r.text(0));
     kids.emplace(r.text(0), std::move(c));

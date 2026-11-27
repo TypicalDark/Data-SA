@@ -60,6 +60,7 @@ struct PointLabel {
   std::optional<IconSpec> icon;
   bool icon_overlap = true; // icons always draw (they still block text)
   bool text_optional = true;  // with an icon: drop the text and keep the icon when the text has no room
+  int pick = -1;            // caller's id for hit testing the icon
 };
 
 struct LineLabel {
@@ -117,6 +118,8 @@ class Engine {
   void finish(double dt, std::vector<Vertex>& out);
 
   bool animating() const { return animating_; }
+  // The pick id of the icon under a screen point (last drawn wins), or -1.
+  int hit(float x, float y, float slop = 3) const;
   size_t placed() const { return placed_; }
   // Boxes the labels and icons of the last frame took, for tests and debugging.
   const CollisionIndex& collisions() const { return index_; }
@@ -149,6 +152,7 @@ class Engine {
   uint64_t frame_ = 0;
   bool animating_ = false;
   size_t placed_ = 0;
+  std::vector<std::pair<Rect, int>> hits_;
 };
 
 // Packs straight RGBA (0..255) into the vertex colour format; `a` scales alpha.

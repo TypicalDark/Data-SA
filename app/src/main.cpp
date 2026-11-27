@@ -52,7 +52,9 @@ int usage(const char* why) {
   if (why) std::fprintf(stderr, "gsa: %s\n", why);
   std::fprintf(stderr,
                "usage: gsa [--data DIR | --api HOST:PORT] [--backend PATH] [--size WxH] [--validation]\n"
-               "           [--screenshot out.png] [--topic NAME] [--select AREA_ID] [--at LON,LAT,ZOOM] [--frames N]\n");
+               "           [--screenshot out.png] [--topic NAME] [--select AREA_ID] [--at LON,LAT,ZOOM] [--frames N]\n"
+               "           [--panel find|rank|list|areas|views|watch|keys|catalogue] [--command LINE] [--spot LON,LAT]\n"
+               "           [--settings FILE]\n");
   return 2;
 }
 
@@ -74,6 +76,14 @@ int main(int argc, char** argv) {
     else if (a == "--screenshot") opt.screenshot = val();
     else if (a == "--topic") opt.topic = val();
     else if (a == "--select") opt.select = val();
+    else if (a == "--panel") opt.panel = val();
+    else if (a == "--command") opt.command = val();
+    else if (a == "--settings") opt.settings_path = val();
+    else if (a == "--spot") {
+      double lon = 0, lat = 0;
+      if (std::sscanf(val().c_str(), "%lf,%lf", &lon, &lat) != 2) return usage("--spot wants LON,LAT");
+      opt.spot = std::make_pair(lon, lat);
+    }
     else if (a == "--frames") opt.max_frames = std::atoi(val().c_str());
     else if (a == "--assets") opt.assets_dir = val();
     else if (a == "--size") {
