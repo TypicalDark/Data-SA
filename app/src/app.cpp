@@ -137,6 +137,7 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
     cam_.cy = geo::my(*opt_.lat);
   }
   if (opt_.zoom) cam_.zoom = *opt_.zoom;
+  if (opt_.pitch) cam_.pitch = pitch_target_ = std::clamp(*opt_.pitch, 0.0, geo::kMaxPitch);
   if (!opt_.lon) cam_.cx -= side_width() / 2 / cam_.scale();  // centre the country in the free map area
   if (!opt_.select.empty()) open_area(opt_.select, !opt_.lon);
   if (opt_.spot) open_spot(opt_.spot->first, opt_.spot->second);
@@ -307,6 +308,11 @@ void App::frame() {
     cam_.cy = fly_->from.cy + (fly_->cy - fly_->from.cy) * e;
     cam_.zoom = fly_->from.zoom + (fly_->zoom - fly_->from.zoom) * e;
     if (k >= 1) fly_.reset();
+  }
+  if (cam_.pitch != pitch_target_) {
+    const double step = std::clamp(ImGui::GetIO().DeltaTime * 160.0, 0.5, 20.0);
+    cam_.pitch = std::abs(pitch_target_ - cam_.pitch) <= step ? pitch_target_
+                                                                : cam_.pitch + (pitch_target_ > cam_.pitch ? step : -step);
   }
 
   for (auto& t : loader_->take()) map_->add(t);
@@ -485,6 +491,7 @@ layers::MapStyle App::map_style_now() const {
   ms.find_on = fdata_ && !rules_.empty();
   if (ms.find_on) ms.find_pass = fpass_;
   ms.filter = filter_;
+  ms.extrude = cam_.pitch > 5;  // buildings stand up once the map is tilted, as on the website
   // ward filters: municipal winners under the wards would show through where wards are hidden
   if (filter_.vote_on() && lstate_.shows("c:ward") && !lstate_.shows("c:muni")) ms.fill = style::Topic::Overview;
   return ms;
@@ -1005,7 +1012,11 @@ void App::handle_input() {
         if (std::hypot(m.x - io.MouseClickedPos[0].x, m.y - io.MouseClickedPos[0].y) > 3) drag_moved_ = true;
         if (drag_moved_) {
           fly_.reset();
-          cam_.pan_px(dx, dy);
+          if (io.KeyCtrl) {  // Ctrl+drag tilts the map
+            cam_.pitch = pitch_target_ = std::clamp(cam_.pitch - dy * 0.3, 0.0, geo::kMaxPitch);
+          } else {
+            cam_.pan_px(dx, dy);
+          }
         }
       }
       drag_x_ = m.x;

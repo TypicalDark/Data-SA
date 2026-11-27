@@ -15,6 +15,24 @@ constexpr int kProvince = 0, kFacility = 10, kMunicipality = 40, kLine = 60;
 
 bool owns(const mvt::Point& p) { return p.x >= 0 && p.y >= 0 && p.x < 1 && p.y < 1; }
 
+// A tile point on the (tilted) screen.
+void at(const TileOnScreen& t, double px, double py, float& x, float& y) {
+  const double fx = t.ox + px * t.k, fy = t.oy + py * t.k;
+  double sx = fx, sy = fy;
+  if (t.cam) t.cam->tilt(fx, fy, 0, sx, sy);
+  x = float(sx);
+  y = float(sy);
+}
+
+text::Rect owner_rect(const TileOnScreen& t) {
+  float x0, y0, x1, y1, x2, y2, x3, y3;
+  at(t, 0, 0, x0, y0);
+  at(t, 1, 0, x1, y1);
+  at(t, 0, 1, x2, y2);
+  at(t, 1, 1, x3, y3);
+  return {std::min({x0, x1, x2, x3}), std::min({y0, y1, y2, y3}), std::max({x0, x1, x2, x3}), std::max({y0, y1, y2, y3})};
+}
+
 std::string fmt_kv(double kv) { return std::to_string(int(std::lround(kv))) + " kV"; }
 
 void admin(const TileOnScreen& t, double zoom, const Fonts& fonts, text::Engine& engine) {
@@ -31,8 +49,7 @@ void admin(const TileOnScreen& t, double zoom, const Fonts& fonts, text::Engine&
     text::PointLabel c;
     c.key = "a" + std::to_string(level) + ":" + name;
     c.text = name;
-    c.x = float(t.ox + p.x * t.k);
-    c.y = float(t.oy + p.y * t.k);
+    at(t, p.x, p.y, c.x, c.y);
     if (level <= 1) {
       if (zoom > 8.5) continue;  // provinces give way to detail
       c.style = {fonts.medium, 15, style::hex("#e6edf3").packed(), halo, 1.6f, 0.02f};
@@ -66,8 +83,7 @@ void grid(const TileOnScreen& t, const layers::MapStyle& ms, double zoom, const 
       if (opacity <= 0) continue;
       text::PointLabel c;
       c.key = "f:" + f.str("id");
-      c.x = float(t.ox + p.x * t.k);
-      c.y = float(t.oy + p.y * t.k);
+      at(t, p.x, p.y, c.x, c.y);
       c.opacity = opacity;
       text::IconSpec ic;
       ic.kind = station ? text::Icon::Circle : text::Icon::Square;
@@ -92,7 +108,7 @@ void grid(const TileOnScreen& t, const layers::MapStyle& ms, double zoom, const 
     }
   }
   if (const auto* l = t.tile->layer("line"); l && ms.lines) {
-    const text::Rect owner{float(t.ox), float(t.oy), float(t.ox + t.k), float(t.oy + t.k)};
+    const text::Rect owner = owner_rect(t);
     int fi = 0;
     for (const auto& f : l->features) {
       ++fi;
@@ -111,7 +127,11 @@ void grid(const TileOnScreen& t, const layers::MapStyle& ms, double zoom, const 
                 std::to_string(fi) + "." + std::to_string(pi);
         c.text = fmt_kv(kv);
         c.pts.reserve(part.size());
-        for (const auto& q : part) c.pts.push_back({float(t.ox + q.x * t.k), float(t.oy + q.y * t.k)});
+        for (const auto& q : part) {
+          float qx, qy;
+          at(t, q.x, q.y, qx, qy);
+          c.pts.push_back({qx, qy});
+        }
         c.owner = owner;
         // light ink reads on every line colour; the line itself carries the voltage colour
         c.style = {fonts.mono, 10.5f, style::hex("#d5dde5").packed(), halo, 1.8f, 0.02f};
@@ -142,8 +162,7 @@ void base(const TileOnScreen& t, const layers::MapStyle& ms, double zoom, const 
       c.text = f.str("name");
       if (c.text.empty()) continue;
       c.key = "p:" + c.text;
-      c.x = float(t.ox + p.x * t.k);
-      c.y = float(t.oy + p.y * t.k);
+      at(t, p.x, p.y, c.x, c.y);
       const float size = (r == 0 ? 15.5f : r == 1 ? 13.0f : r == 2 ? 12.0f : 11.0f) + (zoom > 11 ? 1.0f : 0.0f);
       c.style = {r <= 1 ? fonts.medium : fonts.regular, size, style::hex(r <= 2 ? "#c9d6de" : "#9fb0bc").packed(), halo, 1.6f, 0};
       c.priority = kMunicipality - 12 + r * 6;
@@ -160,8 +179,7 @@ void base(const TileOnScreen& t, const layers::MapStyle& ms, double zoom, const 
       text::PointLabel c;
       c.key = "poi:" + f.str("name") + std::to_string(int(p.x * 4096)) + "," + std::to_string(int(p.y * 4096));
       c.text = zoom >= 15.5 ? f.str("name") : std::string();
-      c.x = float(t.ox + p.x * t.k);
-      c.y = float(t.oy + p.y * t.k);
+      at(t, p.x, p.y, c.x, c.y);
       text::IconSpec ic;
       ic.kind = text::Icon::Circle;
       ic.radius = 3.6f;
@@ -176,7 +194,7 @@ void base(const TileOnScreen& t, const layers::MapStyle& ms, double zoom, const 
     }
   }
   if (const auto* l = t.tile->layer("road"); l && ms.roads && ms.names && zoom >= 13.3 && !overview) {
-    const text::Rect owner{float(t.ox), float(t.oy), float(t.ox + t.k), float(t.oy + t.k)};
+    const text::Rect owner = owner_rect(t);
     int fi = 0;
     for (const auto& f : l->features) {
       ++fi;
@@ -196,7 +214,11 @@ void base(const TileOnScreen& t, const layers::MapStyle& ms, double zoom, const 
         c.key = "r:" + std::to_string(t.id.x) + "/" + std::to_string(t.id.y) + ":" + std::to_string(fi) + "." + std::to_string(pi);
         c.text = name;
         c.pts.reserve(part.size());
-        for (const auto& q : part) c.pts.push_back({float(t.ox + q.x * t.k), float(t.oy + q.y * t.k)});
+        for (const auto& q : part) {
+          float qx, qy;
+          at(t, q.x, q.y, qx, qy);
+          c.pts.push_back({qx, qy});
+        }
         c.owner = owner;
         c.style = {fonts.regular, 10.5f, style::hex("#9fb0bc").packed(), halo, 1.6f, 0};
         c.priority = kLine + 10 + r;

@@ -48,3 +48,42 @@ TEST_CASE("topic colours") {
   CHECK(style::line_visible(400, 3.5));
   CHECK_FALSE(style::line_visible(88, 5.0));
 }
+
+TEST_CASE("tilted view: screen and ground points round-trip") {
+  geo::Camera c;
+  c.w = 1600;
+  c.h = 1000;
+  c.zoom = 14;
+  c.cx = geo::mx(28.05);
+  c.cy = geo::my(-26.1);
+  for (double pitch : {0.0, 30.0, 60.0}) {
+    c.pitch = pitch;
+    for (auto [sx, sy] : {std::pair{800.0, 500.0}, {10.0, 20.0}, {1590.0, 990.0}, {400.0, 700.0}}) {
+      double x, y, bx, by;
+      c.to_world(sx, sy, x, y);
+      c.to_screen(x, y, bx, by);
+      CHECK(bx == doctest::Approx(sx).epsilon(1e-6));
+      CHECK(by == doctest::Approx(sy).epsilon(1e-6));
+    }
+    // the centre stays put, and land at the top of the screen is further off when tilted
+    double x, y;
+    c.to_world(800, 500, x, y);
+    CHECK(x == doctest::Approx(c.cx));
+    CHECK(y == doctest::Approx(c.cy));
+  }
+  geo::Camera flat = c;
+  flat.pitch = 0;
+  double fy, ty, x;
+  flat.to_world(800, 0, x, fy);
+  c.pitch = 60;
+  c.to_world(800, 0, x, ty);
+  CHECK(ty < fy);
+  CHECK(geo::cover(c, 14).size() > geo::cover(flat, 14).size());
+  // zooming at a point keeps it under the pointer when tilted
+  double wx, wy, ax, ay;
+  c.to_world(300, 200, wx, wy);
+  c.zoom_at(0.5, 300, 200);
+  c.to_world(300, 200, ax, ay);
+  CHECK(ax == doctest::Approx(wx).epsilon(1e-9));
+  CHECK(ay == doctest::Approx(wy).epsilon(1e-9));
+}

@@ -32,8 +32,9 @@ struct TileOnScreen {
   std::shared_ptr<const mvt::Tile> tile;
   std::string pack;
   geo::TileId id;
-  double ox = 0, oy = 0;  // screen position of the tile's top-left corner
+  double ox = 0, oy = 0;  // flat screen position of the tile's top-left corner (before any tilt)
   double k = 0;           // screen pixels per tile unit
+  const geo::Camera* cam = nullptr;  // tilts flat positions onto the screen (3D)
   std::vector<FeatureRef>* picks = nullptr;  // facility icons register here
 };
 

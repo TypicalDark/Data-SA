@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace gsa::geo {
@@ -41,40 +42,87 @@ struct TileIdHash {
   size_t operator()(const TileId& t) const { return (size_t(t.z) << 58) ^ (size_t(t.x) << 29) ^ size_t(t.y); }
 };
 
+// The map view. With `pitch` (degrees, 0 = straight down, up to kMaxPitch) the ground tilts away
+// around the screen centre: a camera `dist()` pixels above the centre looks at it, so the top of the
+// screen shows land further off. "Flat" screen coordinates are where a point sits with no tilt; the
+// renderer applies the tilt on the GPU with the same formula as tilt().
+inline constexpr double kMaxPitch = 60.0;
+
 struct Camera {
   double cx = mx(25.2), cy = my(-28.8);  // centre, world units
   double zoom = 5.4;
   double w = 1280, h = 800;            // viewport in logical pixels
+  double pitch = 0;                    // degrees
 
   double scale() const { return kTilePx * std::pow(2.0, zoom); }  // pixels per world unit
-  void to_screen(double x, double y, double& sx, double& sy) const {
-    sx = (x - cx) * scale() + w / 2;
-    sy = (y - cy) * scale() + h / 2;
+  double dist() const { return 1.5 * h; }                         // camera height over the centre, pixels
+  // Flat screen point -> tilted screen point; z is height above the ground in pixels.
+  void tilt(double fx, double fy, double z, double& sx, double& sy) const {
+    if (pitch <= 0 && z == 0) {
+      sx = fx;
+      sy = fy;
+      return;
+    }
+    const double t = pitch * kPi / 180, c = std::cos(t), s = std::sin(t), D = dist();
+    const double X = fx - w / 2, Y = fy - h / 2;
+    const double Yp = Y * c - z * s, Zp = Y * s + z * c;
+    const double k = D / std::max(1.0, D - Zp);
+    sx = w / 2 + X * k;
+    sy = h / 2 + Yp * k;
   }
+  void to_flat(double x, double y, double& fx, double& fy) const {
+    fx = (x - cx) * scale() + w / 2;
+    fy = (y - cy) * scale() + h / 2;
+  }
+  void to_screen(double x, double y, double& sx, double& sy) const {
+    double fx, fy;
+    to_flat(x, y, fx, fy);
+    tilt(fx, fy, 0, sx, sy);
+  }
+  // Screen point -> the ground point under it (above the horizon it clamps to far away).
   void to_world(double sx, double sy, double& x, double& y) const {
-    x = (sx - w / 2) / scale() + cx;
-    y = (sy - h / 2) / scale() + cy;
+    double fx = sx, fy = sy;
+    if (pitch > 0) {
+      const double t = pitch * kPi / 180, c = std::cos(t), s = std::sin(t), D = dist();
+      const double v = (sy - h / 2) / D;
+      const double den = std::max(0.05, c + v * s);
+      const double Y = v * D / den;
+      const double k = D / (D - Y * s);
+      fx = w / 2 + (sx - w / 2) / k;
+      fy = h / 2 + Y;
+    }
+    x = (fx - w / 2) / scale() + cx;
+    y = (fy - h / 2) / scale() + cy;
   }
   // Zoom by dz keeping the world point under (sx, sy) fixed.
   void zoom_at(double dz, double sx, double sy, double zmin = 3.0, double zmax = 16.0) {
     double wx, wy;
     to_world(sx, sy, wx, wy);
     zoom = std::clamp(zoom + dz, zmin, zmax);
-    cx = wx - (sx - w / 2) / scale();
-    cy = wy - (sy - h / 2) / scale();
+    double nx, ny;
+    to_world(sx, sy, nx, ny);
+    cx += wx - nx;
+    cy += wy - ny;
   }
   void pan_px(double dx, double dy) {
-    cx -= dx / scale();
-    cy = std::clamp(cy - dy / scale(), 0.0, 1.0);
+    // the ground point at the centre moves with the pointer
+    double ax, ay, bx, by;
+    to_world(w / 2, h / 2, ax, ay);
+    to_world(w / 2 - dx, h / 2 - dy, bx, by);
+    cx += bx - ax;
+    cy = std::clamp(cy + by - ay, 0.0, 1.0);
   }
 };
 
 // Tiles at zoom tz covering the viewport, nearest to the centre first.
 inline std::vector<TileId> cover(const Camera& c, int tz) {
   const double n = double(1u << tz);
-  double x0, y0, x1, y1;
-  c.to_world(0, 0, x0, y0);
-  c.to_world(c.w, c.h, x1, y1);
+  double x0 = 1, y0 = 1, x1 = 0, y1 = 0;
+  for (const auto& [sx, sy] : {std::pair{0.0, 0.0}, {c.w, 0.0}, {0.0, c.h}, {c.w, c.h}}) {
+    double x, y;
+    c.to_world(sx, sy, x, y);
+    x0 = std::min(x0, x), y0 = std::min(y0, y), x1 = std::max(x1, x), y1 = std::max(y1, y);
+  }
   const int tx0 = std::max(0, int(std::floor(x0 * n))), tx1 = std::min(int(n) - 1, int(std::floor(x1 * n)));
   const int ty0 = std::max(0, int(std::floor(y0 * n))), ty1 = std::min(int(n) - 1, int(std::floor(y1 * n)));
   std::vector<TileId> out;

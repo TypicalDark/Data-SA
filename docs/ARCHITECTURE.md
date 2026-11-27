@@ -73,6 +73,13 @@ that should sync later (saved views, watchlists) will go through the API.
   Plots come from the `parcels` pack from zoom 12.5 while Property plots is on: fills in the website's
   value bands where a roll matched, thin outlines from 13.5, and a plot card (value, roll, category,
   use, last sale, area, SG code) on click.
+  3D: `geo::Camera::pitch` (0 to 60 degrees) tilts the ground around the screen centre as seen by a
+  camera 1.5 screen heights above it. Every vertex is placed flat as before and then tilted on the GPU
+  with the same formula as `Camera::tilt` (map and image shaders), with a height in metres for
+  extruded buildings; labels, icons and overlays go through `Camera::to_screen`, and clicks through
+  its inverse `to_world`. Tilted, buildings stand up to their heights: walls shaded by the way they
+  face and roofs, drawn far to near since there is no depth buffer. The 3D button tilts to 50
+  degrees and back; Ctrl+drag tilts by hand; `--pitch` sets it for screenshots.
 - **UI (matches the live website, v57).** Dear ImGui in the same render pass after the map, with the
   website's tokens (`ui_theme.hpp`) and drawn line icons (`icons.cpp`): 60 px icon rail, 380 px docked
   sidebar with the search box and command line, the card or panel, and the On the map dock (group tabs,

@@ -43,6 +43,7 @@ struct AppOptions {
   std::string panel;           // rail panel to open: find rank list areas views watch keys
   std::string command;         // a command line to run at start, for example "apollo DES"
   std::optional<double> lon, lat, zoom;
+  std::optional<double> pitch;  // tilt in degrees (3D), 0 to 60
   std::optional<std::pair<double, double>> spot;  // right-click spot to open (lon, lat)
   std::string measure;  // "area:lon,lat,lon,lat,...": a finished measurement (for screenshots)
   int max_frames = 0;          // quit after this many frames (0 = run until closed)
@@ -162,6 +163,7 @@ class App {
     double cx, cy, zoom;
   };
   std::optional<Fly> fly_;
+  double pitch_target_ = 0;  // the tilt eases towards this
   bool dragging_ = false, drag_moved_ = false;
   double drag_x_ = 0, drag_y_ = 0;
   std::vector<PackZoom> packs_;      // tile packs drawn now: admin, the web packs in use, grid

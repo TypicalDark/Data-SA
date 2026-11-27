@@ -16,8 +16,9 @@ struct Vertex {
   float ex, ey;  // screen-pixel extrusion
   uint32_t rgba;
   float minz;
+  float h = 0;   // height above the ground in metres (extruded buildings in 3D)
 };
-static_assert(sizeof(Vertex) == 24);
+static_assert(sizeof(Vertex) == 28);
 
 struct Mesh {
   std::vector<Vertex> fill;     // area fills

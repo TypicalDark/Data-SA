@@ -738,8 +738,8 @@ void App::ui_controls() {
     return click && enabled;
   };
   const float y0 = y - 3 * s - 14;
-  if (button("##3d", y0, icons::Id::Cube, "3D", "3D terrain and tilt come with milestone E", true))
-    toast("3D terrain and tilt come with the base map (milestone E)");
+  if (button("##3d", y0, icons::Id::Cube, cam_.pitch > 1 ? "2D" : "3D", "Tilt the map (3D); Ctrl+drag to tilt by hand", true))
+    pitch_target_ = cam_.pitch > 1 ? 0 : 50;
   if (button("##zi", y0 + s + 14, icons::Id::Plus, nullptr, "Zoom in (+)", true)) fly_ = Fly{glfwGetTime(), 0.25, cam_, cam_.cx, cam_.cy, std::min(16.0, cam_.zoom + 1)};
   if (button("##zo", y0 + 2 * s + 14, icons::Id::Minus, nullptr, "Zoom out (-)", true)) fly_ = Fly{glfwGetTime(), 0.25, cam_, cam_.cx, cam_.cy, std::max(3.0, cam_.zoom - 1)};
   if (button("##home", y0 + 3 * s + 14, icons::Id::Home, nullptr, "Whole country (Home)", true)) fly_to(25.2, -28.8, 5.4);

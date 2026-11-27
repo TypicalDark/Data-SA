@@ -59,6 +59,57 @@ void outline(const mvt::Feature& f, float hw, uint32_t rgba, float minz, std::ve
 
 float kv_minz(double kv) { return kv >= 400 ? 4.0f : kv >= 220 ? 5.0f : kv >= 132 ? 6.0f : 7.0f; }
 
+// 3D buildings: walls shaded by the way they face, then the roof, the farthest (northern) buildings
+// first so nearer ones cover them (there is no depth buffer).
+void extrude_buildings(const mvt::Layer& l, std::vector<Vertex>& out) {
+  std::vector<std::pair<float, size_t>> order;
+  order.reserve(l.features.size());
+  for (size_t i = 0; i < l.features.size(); ++i) {
+    const auto& f = l.features[i];
+    if (f.parts.empty() || f.parts[0].size() < 3) continue;
+    float y = 0;
+    for (const auto& p : f.parts[0]) y = std::max(y, p.y);
+    order.push_back({y, i});
+  }
+  std::sort(order.begin(), order.end());
+  const style::Rgba roof = style::hex("#2e4050"), dark = style::hex("#151f27"), lit = style::hex("#3d5366");
+  // light from the north-west, as the hillshade
+  const float lx = -0.7071f, ly = -0.7071f;
+  for (const auto& [y, i] : order) {
+    const auto& f = l.features[i];
+    const float h = float(f.num("h").value_or(4));
+    const auto& r = f.parts[0];
+    const size_t n = (r.size() > 3 && r.front().x == r.back().x && r.front().y == r.back().y) ? r.size() - 1 : r.size();
+    double area = 0;
+    for (size_t j = 0; j < n; ++j) area += double(r[j].x) * r[(j + 1) % n].y - double(r[(j + 1) % n].x) * r[j].y;
+    const float sgn = area > 0 ? 1.0f : -1.0f;  // outward normal side for either winding (y down)
+    for (size_t j = 0; j < n; ++j) {
+      const auto& a = r[j];
+      const auto& b = r[(j + 1) % n];
+      const float dx = b.x - a.x, dy = b.y - a.y, len = std::sqrt(dx * dx + dy * dy);
+      if (len <= 0) continue;
+      const float nx = sgn * dy / len, ny = -sgn * dx / len;
+      if (ny < -0.05f) continue;  // walls facing north are behind the building from this view
+      const float t = std::clamp(0.5f + 0.5f * (nx * lx + ny * ly), 0.0f, 1.0f);
+      style::Rgba c;
+      c.r = uint8_t(dark.r + (lit.r - dark.r) * t);
+      c.g = uint8_t(dark.g + (lit.g - dark.g) * t);
+      c.b = uint8_t(dark.b + (lit.b - dark.b) * t);
+      c.a = 245;
+      const uint32_t cp = c.packed();
+      const Vertex a0{a.x, a.y, 0, 0, cp, 14.3f, 0}, b0{b.x, b.y, 0, 0, cp, 14.3f, 0};
+      const Vertex a1{a.x, a.y, 0, 0, cp, 14.3f, h}, b1{b.x, b.y, 0, 0, cp, 14.3f, h};
+      out.insert(out.end(), {a0, b0, b1, a0, b1, a1});
+    }
+    const size_t before = out.size();
+    add_polygon(f, style::Rgba{roof.r, roof.g, roof.b, 250}.packed(), out);
+    for (size_t k = before; k < out.size(); ++k) {
+      out[k].minz = 14.3f;
+      out[k].h = h;
+    }
+  }
+}
+
 // The website's base map (dark theme): land use under everything, then roads with casings and rail.
 // Tiles below zoom 10 are the overview (main roads only), from 10 the regional tiles (every class).
 void base_map(const mvt::Tile& tile, bool overview, Mesh& out) {
@@ -126,6 +177,10 @@ void build(const std::string& pack, const mvt::Tile& tile, const layers::MapStyl
     // footprints over the roads, as on the website (from zoom 13.3, fully shown at 14.3)
     if (!ms.buildings) return;
     if (const auto* l = tile.layer("building")) {
+      if (ms.extrude) {
+        extrude_buildings(*l, out.lines);
+        return;
+      }
       const uint32_t c = style::hex("#22303b", 0.88f).packed();
       for (const auto& f : l->features) {
         if (f.parts.empty() || f.parts[0].size() < 3) continue;
