@@ -198,7 +198,8 @@ def cmd_parcels(db, a):
                                            muni_id,geom,src,snapshot_ids)
                     SELECT DISTINCT ON (props->>'sg21') props->>'sg21', props->>'type', props->>'lstatus', props->>'town', props->>'town_code',
                            props->>'parcel', props->>'portion', props->>'farm_name', props->>'scheme', (props->>'area_m2')::float,
-                           (props->>'sg_date')::date,
+                           CASE WHEN props->>'sg_date' ~ '^\d{4}-\d{2}-\d{2}$' THEN (props->>'sg_date')::date
+                                WHEN props->>'sg_date' ~ '^\d{4}-\d{2}$' THEN (props->>'sg_date' || '-01')::date END,  -- KZN gives year-month
                            (SELECT area_id FROM core.admin_area WHERE area_id=props->>'muni'),
                            ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON(gj),4326)),3)),
                            props->>'src', %s

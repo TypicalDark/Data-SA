@@ -1,11 +1,12 @@
 # Grid of SA: data architecture
 
-Raw archive, processed formats, data structures and database. Version 1, 27 November 2026.
+Raw archive, processed formats, data structures, database and serving. Version 2, 27 November 2026.
 
 This document says how every dataset behind the map is kept, from the original download through to the
-tiles the map reads. It fits the desktop app plan (Tauri shell, a front-end that talks only to a
-versioned `/v1` API, a Rust back-end, PMTiles data packs). The scripts it describes are in
-`grid-of-sa/datastore/` and have been run end to end on real project data (section 9).
+tiles the map reads. It fits the desktop app (C++ front-end that talks only to a versioned `/v1` API, the C++
+back-end `gsa-backend`, PMTiles and SQLite data packs; see `docs/ARCHITECTURE.md`). The scripts it
+describes are in `datastore/` of the Data-SA repository and have been run end to end on the national
+data (section 9).
 
 ## 1. The short version
 
@@ -178,7 +179,7 @@ with a `network` column so the power grid, roads and rivers share one structure.
 - **Roads:** edge cost is seconds per mode (car, walk, cycle) from OSM speed limits plus SA defaults, as in the reach thread. Isochrones come from `pgr_drivingDistance`; for national use the existing precomputed reach tiles stay the delivery format.
 - **Rivers and water:** a directed graph (flow direction), so "everything upstream of this dam" is a traversal.
 
-The pack copies `node` and `edge` without geometry, so the Rust back-end can run traces in memory.
+The pack copies `node` and `edge` without geometry, so the C++ back-end runs traces in memory (`backend/src/graph.cpp`, `/v1/trace`).
 
 ### 4.4 Time series
 
@@ -233,9 +234,11 @@ map can be traced to the raw file it came from.
 | Schema | `schema/001_core.sql` | tested |
 | Load | `etl/gsa_load.py sources, admin, suburbs, population, parcels, valuation, grid, climate, dams` | tested on real data |
 | Tree, keys, roll-ups, H3, search | `etl/build_tree.sql` | tested |
-| Tiles | `export/export_tiles.py` (tippecanoe, packs admin, grid, parcels, h3, places) | tested |
-| Desktop pack | `export/export_pack.py` (SQLite with FTS5) | tested |
+| Tiles | `export/export_tiles.py` (tippecanoe per zoom band + tile-join; packs admin, grid, parcels-<prov>, h3, places) | national run |
+| Attribute pack | `export/export_pack.py` (SQLite, FTS5 search, packed time series) | national run |
+| Release | `export/build_packs.py` (versions, sha256, `manifest.json`, `packs/installed.json`) | national run |
 | Run everything | `run_all.sh` | written |
+| Serve | `gsa-backend --data RELEASE` (C++, `backend/`) | national run |
 
 Still to write, in this order: KZN COGTA and metro valuation extras, 2026 wards and the 2021-2026
 crosswalk, IEC results into `ts`, farms and crops, transport, solar and wind, hazards and environment,
@@ -251,8 +254,8 @@ The project folder holds 9.2 of its 10 GB and cannot take the raw archive or the
 |---|---|---|---|
 | Raw archive | 12 GB without the big sets, about 25-30 GB with DFFE erven, OpenSky and Copernicus | your PC, for example `D:\GridOfSA\raw` | external drive, or a private Cloudflare R2 / Backblaze B2 bucket (about R10 per month for 30 GB) |
 | PostGIS database | about 25-35 GB with 9 M parcels and indexes (9 M parcels at about 2 KB each, 2.9 M roll rows, 21 M climate values) | your PC (Docker) | rebuildable from the archive; `pg_dump` weekly |
-| PMTiles + SQLite packs | 5-8 GB national: parcel tiles 3-4 GB, SQLite pack about 3 GB (climate as one row per value is 1 GB of it; storing each series as one packed array would cut that to about 100 MB, the next improvement) | cloud bucket for the app, copy on your PC | the bucket |
-| This spec, scripts, catalogs, samples | under 50 MB | project folder `grid-of-sa/datastore/` | project folder |
+| PMTiles + SQLite packs (one release) | 5.3 GB national: plot tiles 1.9 GB in nine province packs, attribute pack 3.2 GB, the rest 0.2 GB | cloud bucket for the app, copy on your PC | the bucket |
+| This spec and the scripts | under 1 MB | the Data-SA repository, `datastore/` | GitHub |
 
 What this means for the project folder: once the archive and database exist on your PC, the processed
 copies in the project folder become rebuildable outputs rather than the only copy. The download zips in
@@ -282,6 +285,21 @@ PostgreSQL 16.10, PostGIS 3.4, pgRouting 3.6, h3-pg 4.1, tippecanoe 2.49, on the
 | Tiles | admin 47.8 MB, grid 8.4 MB, h3 0.5 MB, parcels 17.1 MB (2 municipalities), places 0.3 MB; checked wards absent at z5, suburbs only from z11 | 1.5 min |
 | SQLite pack | 1.66 GB: tree 11,681, metrics 54,442, values 2.2 M, graph, 21.2 M climate values, FTS5 search ("beaufort" finds the municipality and its wards) | 1 min |
 
+
+### National run (27 November 2026, evening)
+
+| Step | Result | Time |
+|---|---|---|
+| Plots | 8,881,163 unique SG parcels in 256 files; 98.7% placed in a ward, 95.5% in a suburb | 60 min load + 50 min tree build |
+| Database | 20 GB on disk with indexes | |
+| Roll-ups | plots and median values at every level, e.g. Gauteng 2.42 M plots, median R510,000; national median R240,000 | in the tree build |
+| Tiles | admin 96 MB, grid 19 MB, h3 68 MB, places 0.4 MB, plots 1.92 GB in nine province packs (Gauteng 286 MB largest, Mpumalanga 147 MB smallest) | 35 min |
+| Attribute pack | 3.2 GB: plots 1.15 GB, search 1 GB, valuations 0.4 GB, packed climate 0.15 GB | 4 min |
+| Release | 15 packs, 5.34 GB, served by `gsa-backend`; plot card in 8 ms, FEED trace in under 40 ms | |
+
+Next size win: split the attribute pack's plot, valuation and plot-search rows per province like the tiles,
+so a user who installs one province downloads about a ninth of the 2.7 GB plot part.
+
 ## 10. Running it on your PC
 
 ```
@@ -302,3 +320,31 @@ bash datastore/run_all.sh          # or the same steps one by one, see run_all.s
 
 h3-pg is not in the stock PostGIS image; add it with `apt install postgresql-16-h3` inside the container
 or use the `run_all.sh` note. Each script prints its own help with `--help`.
+
+## 11. Serving: release folders, the back-end and the website
+
+A **release folder** is the hand-over point between the data store and everything that shows data:
+
+```
+RELEASE/manifest.json                    gsa-manifest/1: packs, versions, sha256, url, changed
+RELEASE/packs/installed.json             gsa-installed/1: what gsa-backend's PackStore reads
+RELEASE/packs/<id>/<id>-<version>.<ext>  pmtiles, sqlite or json
+```
+
+- **Versions** are `<YYYYMMDD>-<sha256 prefix>`. `build_packs.py --previous OLD/manifest.json` keeps the
+  version of a pack whose bytes did not change, so the updater downloads only changed packs.
+- **Split packs** carry `region` (`parcels-wc` is `WC`), so the app can offer province by province.
+- **Desktop:** the updater (roadmap step 11) downloads changed packs beside the old ones, checks sha256,
+  rewrites `installed.json` and calls `PackStore::reload()`; the old release stays for rollback.
+- **Server:** the same folder on a volume (or R2 behind the same interface) with the same binary.
+- **Routes over the attribute pack:** `/v1/areas/{id}` (tree), `/v1/search`, `/v1/parcels/{sg21}` (plot card),
+  `/v1/series` (charts), `/v1/graph/{network}/nodes/{id}` and `/v1/trace` (TR, PATH, FEED, FAIL). The grid
+  graph is built in memory from the pack's `node`/`edge` tables on first use and cached per pack snapshot.
+  The contract is `api/openapi.yaml`.
+
+**The website** (the published deck.gl artifact) cannot read PMTiles from its asset store: the artifact
+host refuses binary files, so its data ships as JSON/base64 bundles uploaded as assets (see the map
+pipeline notes). Today those bundles come from the website's own scripts, and `tools/webpack` converts
+them into `web-*` and `raster-*` packs for the app. The target is one source for both: an
+`export/export_web.py` that writes the website's bundle format from the same PostGIS tables, so a fix in
+the data store reaches the website and the app in the same release. That exporter is not written yet.

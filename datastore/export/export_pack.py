@@ -40,8 +40,10 @@ TABLES = {
  "snapshot": ("SELECT snapshot_id, source_id, fetched_utc::text, tree_sha256, same_as FROM meta.snapshot",
               "snapshot_id TEXT PRIMARY KEY, source_id TEXT, fetched_utc TEXT, tree_sha256 TEXT, same_as TEXT"),
 }
+# Keyed by a text code: storing the row in the primary key b-tree saves a separate index (about 270 MB nationally).
+WITHOUT_ROWID = {"parcel"}
 INDEXES = ["CREATE INDEX tree_parent ON tree(parent_id)", "CREATE INDEX parcel_ward ON parcel(ward_id)",
-           "CREATE INDEX parcel_qk ON parcel(quadkey_z16)", "CREATE INDEX val_sg21 ON valuation(sg21)",
+"CREATE INDEX val_sg21 ON valuation(sg21)",
            "CREATE INDEX edge_s ON edge(network, source)", "CREATE INDEX edge_t ON edge(network, target)",
            "CREATE INDEX series_e ON series(entity_id, variable)"]
 
@@ -94,7 +96,7 @@ def main():
     munis = [m for m in (a.muni or "").split(",") if m]
     fmt = dict(muni=f"WHERE muni_id = ANY(%(m)s)" if munis else "", vmuni=f"WHERE muni_code = ANY(%(m)s)" if munis else "")
     for name, (sql, ddl) in TABLES.items():
-        lite.execute(f"CREATE TABLE {name} ({ddl})")
+        lite.execute(f"CREATE TABLE {name} ({ddl})" + (" WITHOUT ROWID" if name in WITHOUT_ROWID else ""))
         q = sql.format(**fmt)
         n = 0
         with pg.cursor(name=f"x_{name}") as c:

@@ -139,7 +139,7 @@ SELECT 'node:power:' || node_id, name, concat_ws(' ', kind, array_to_string(kv, 
 FROM net.node WHERE network = 'power' AND name IS NOT NULL;
 INSERT INTO core.search (ref, label, detail, rank, pt)
 SELECT 'parcel:' || sg21, coalesce(town, farm_name, '') || ' ' || coalesce(parcel_no, '') || coalesce('/' || nullif(portion_no, ''), ''),
-       concat_ws(', ', kind, sg21), 1, ST_PointOnSurface(geom)
+       kind, 1, ST_PointOnSurface(geom)   -- the SG code is the ref; look it up with /v1/parcels/{sg21}
 FROM core.parcel;
 
 ANALYZE;
