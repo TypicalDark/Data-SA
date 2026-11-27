@@ -1,0 +1,11 @@
+/build*/
+/out/
+/.vs/
+/.vscode/
+/vcpkg_installed/
+*.user
+compile_commands.json
+__pycache__/
+*.pyc
+/GridOfSA-internal/
+shot-*.png
