@@ -76,18 +76,20 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
       const std::string id = p["id"];
       const std::string type = p.value("tile_type", "");
       // vector packs, and image packs ("raster-...") as PNG
-      if (type != "mvt" && !(type == "png" && is_raster_pack(id))) continue;
+      if (type != "mvt" && !(type == "png" && is_raster_pack(id)) && id != "buildings") continue;
       pack_ids.push_back(id);
-      if (id == "admin" || id == "base" || id == "grid" || id.rfind("web-", 0) == 0 || is_raster_pack(id))
-        all_packs_.push_back({id, p.value("minzoom", 0), p.value("maxzoom", 14)});
+      if (id == "admin" || id == "base" || id == "buildings" || id == "grid" || id.rfind("web-", 0) == 0 || is_raster_pack(id))
+        all_packs_.push_back({id, p.value("minzoom", 0), p.value("maxzoom", 14), id == "buildings" ? 13.0 : 0.0});
       auto& names = pack_layers_[id];
       for (const auto& l : p.value("layers", json::array())) {
         if (l.is_string()) names.push_back(l.get<std::string>());
         else if (l.is_object() && l.contains("id")) names.push_back(l["id"].get<std::string>());
       }
     }
-    // draw order: municipalities at the bottom, the base map, website layers, then the grid on top
-    auto rank = [](const std::string& id) { return id == "admin" ? 0 : id == "base" ? 1 : id == "grid" ? 3 : 2; };
+    // draw order: municipalities at the bottom, the base map, buildings, website layers, then the grid
+    auto rank = [](const std::string& id) {
+      return id == "admin" ? 0 : id == "base" ? 1 : id == "buildings" ? 2 : id == "grid" ? 4 : 3;
+    };
     std::sort(all_packs_.begin(), all_packs_.end(),
               [&](const auto& a, const auto& b) { return rank(a.pack) != rank(b.pack) ? rank(a.pack) < rank(b.pack) : a.pack < b.pack; });
   }
@@ -98,6 +100,14 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
   side_open_ = sd.value("side_open", true);
   if (opt_.screenshot.empty() || !opt_.settings_path.empty()) {  // screenshots read an explicit settings file
     rules_ = find::rules_from(sd.value("find_rules", json::array()));
+    if (sd.contains("base") && sd["base"].is_object()) {
+      const auto& b = sd["base"];
+      lstate_.roads = b.value("roads", lstate_.roads);
+      lstate_.terrain = b.value("terrain", lstate_.terrain);
+      lstate_.names = b.value("names", lstate_.names);
+      lstate_.buildings = b.value("buildings", lstate_.buildings);
+      lstate_.landmarks = b.value("landmarks", lstate_.landmarks);
+    }
     if (sd.contains("filter") && sd["filter"].is_object()) {
       const auto& j = sd["filter"];
       try {
@@ -511,6 +521,7 @@ void App::apply_layers() {
   const bool base = lstate_.roads || lstate_.landmarks || lstate_.names;
   for (const auto& p : all_packs_) {
     if (p.pack == "base" && !base) continue;
+    if (p.pack == "buildings" && !lstate_.buildings) continue;
     if ((p.pack.rfind("web-", 0) != 0 && !is_raster_pack(p.pack)) || want.count(p.pack)) packs_.push_back(p);
   }
 }
@@ -771,6 +782,8 @@ void App::save_settings() {
   auto& d = settings_->data();
   d["side_open"] = side_open_;
   d["topic"] = lstate_.topic;
+  d["base"] = json{{"roads", lstate_.roads}, {"terrain", lstate_.terrain}, {"names", lstate_.names},
+                   {"buildings", lstate_.buildings}, {"landmarks", lstate_.landmarks}};
   settings_->save();
 }
 

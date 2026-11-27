@@ -122,6 +122,20 @@ void build(const std::string& pack, const mvt::Tile& tile, const layers::MapStyl
     }
     return;
   }
+  if (pack == "buildings") {
+    // footprints over the roads, as on the website (from zoom 13.3, fully shown at 14.3)
+    if (!ms.buildings) return;
+    if (const auto* l = tile.layer("building")) {
+      const uint32_t c = style::hex("#22303b", 0.88f).packed();
+      for (const auto& f : l->features) {
+        if (f.parts.empty() || f.parts[0].size() < 3) continue;
+        const size_t before = out.lines.size();
+        add_polygon(f, c, out.lines);
+        for (size_t i = before; i < out.lines.size(); ++i) out.lines[i].minz = 14.3f;
+      }
+    }
+    return;
+  }
   if (pack == "base") {
     if (ms.roads) base_map(tile, z < 10, out);
     return;

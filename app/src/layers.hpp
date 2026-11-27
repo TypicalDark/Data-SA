@@ -124,6 +124,7 @@ struct MapStyle {
   bool lines = false, subs = false, plants = false;
   bool names = true;
   bool roads = false, pois = false;  // base map: roads, rail and land use; landmarks
+  bool buildings = false;
   std::vector<Extra> extra;  // website layers, bottom first
   std::vector<std::string> rasters;  // image packs to draw over the fills, bottom first
   // Find: municipalities that meet every condition stay lit and the rest go dark
@@ -132,7 +133,7 @@ struct MapStyle {
   Filters filter;
   bool operator==(const MapStyle& o) const {
     return fill == o.fill && muni_borders == o.muni_borders && lines == o.lines && subs == o.subs && plants == o.plants &&
-           names == o.names && roads == o.roads && pois == o.pois && extra == o.extra && rasters == o.rasters && find_on == o.find_on && find_pass == o.find_pass && filter == o.filter;
+           names == o.names && roads == o.roads && pois == o.pois && buildings == o.buildings && extra == o.extra && rasters == o.rasters && find_on == o.find_on && find_pass == o.find_pass && filter == o.filter;
   }
   bool operator!=(const MapStyle& o) const { return !(*this == o); }
 };

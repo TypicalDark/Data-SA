@@ -346,6 +346,7 @@ int MapRenderer::tile_zoom(double zoom, const PackZoom& p) {
 std::vector<TileKey> MapRenderer::needed(const geo::Camera& cam, const std::vector<PackZoom>& packs) const {
   std::vector<TileKey> out;
   for (const auto& p : packs) {
+    if (cam.zoom < p.show_from) continue;
     const int tz = tile_zoom(cam.zoom, p);
     // the parent level first, so something shows quickly when jumping far
     if (tz > p.minzoom)
@@ -361,6 +362,7 @@ std::vector<TileKey> MapRenderer::drawable(const geo::Camera& cam, const std::ve
   std::vector<TileKey> out;
   std::set<TileKey> seen;
   for (const auto& p : packs) {
+    if (cam.zoom < p.show_from) continue;
     const int tz = tile_zoom(cam.zoom, p);
     std::vector<TileKey> fallbacks, exact;
     for (const auto& id : geo::cover(cam, tz)) {

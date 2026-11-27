@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <stdexcept>
 
+#include "gsb.hpp"
+
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #define STBI_NO_STDIO
@@ -78,6 +80,7 @@ void TileLoader::run() {
     if (r.status == 200) {
       try {
         if (is_raster_pack(k.pack)) lt.raster = decode_png(r.body);
+        else if (k.pack == "buildings") lt.tile = std::make_shared<const mvt::Tile>(gsb::decode(r.body, k.id.x, k.id.y));
         else lt.tile = std::make_shared<const mvt::Tile>(mvt::decode(r.body));
       } catch (const std::exception& e) {
         std::fprintf(stderr, "tile %s/%d/%u/%u: %s\n", k.pack.c_str(), k.id.z, k.id.x, k.id.y, e.what());

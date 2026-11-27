@@ -65,6 +65,11 @@ that should sync later (saved views, watchlists) will go through the API.
   the zoom the website shows it), rail, and in the label pass towns by rank, street names along the
   roads from zoom 13.3 and landmarks as coloured dots from zoom 14.3 (names from 15.5). The Roads,
   Names and Landmarks base toggles switch these; the pack is not fetched when all three are off.
+  Buildings come from the `buildings` pack: z12 tiles in the website's GSB1 encoding (rectangles as
+  centre, size and angle; the rest as polygons). `gsb.cpp` decodes a tile into a vector layer with
+  each footprint's height (measured, or estimated as the website does), and the mesh draws them over
+  the roads from zoom 13.3. The pack is fetched only with Buildings on and from zoom 13
+  (`PackZoom::show_from`). Base toggles are saved in the settings under `base`.
 - **UI (matches the live website, v57).** Dear ImGui in the same render pass after the map, with the
   website's tokens (`ui_theme.hpp`) and drawn line icons (`icons.cpp`): 60 px icon rail, 380 px docked
   sidebar with the search box and command line, the card or panel, and the On the map dock (group tabs,
