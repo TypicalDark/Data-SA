@@ -29,7 +29,7 @@ seven milestones across the steps above:
 |---|---|---|
 | A | Shell like the website: rail, docked sidebar, search and command line, cards with function strips, On the map dock, catalogue, breadcrumb, status bar, spot card, saved views, watchlist, measure | first cut done |
 | B | Website data as desktop packs (all 71 layers, find grid) built from the project data store | done: `tools/webpack`, nine `web-*` vector packs and ten `raster-*` image packs (terrain shading, fire, flood, ships, farm use, rain, solar yield, GHI, rooftop solar), generic drawing, image tiles, click cards |
-| C | Find with distance conditions and party, Rank, Filter, full spot summary | Find, Rank and the spot summary done (`find.cpp`, `find` JSON pack, `/v1/data`); Filter next |
+| C | Find with distance conditions and party, Rank, Filter, full spot summary | Find, Rank, the spot summary and Filter done (`find.cpp`, `find` JSON pack, `/v1/data`, `layers::Filters`); ward margins wait for the full ward results |
 | D | TR, FAIL, FEED, PATH on the grid network | |
 | E | Base map: roads, land use, buildings, terrain, 3D, plots, themes | |
 | F | Reach, Analyse, live feeds | |

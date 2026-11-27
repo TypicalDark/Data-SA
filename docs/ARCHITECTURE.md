@@ -77,7 +77,10 @@ that should sync later (saved views, watchlists) will go through the API.
   drawn with the admin lines so it covers every pack's fills and images. Rank lists seven things in the
   current view (substations, power stations, free capacity, dams lowest first, municipalities by value
   or people, airports). The spot card adds the website's summary (nearest town, dam, free capacity,
-  airport, port, and which Find conditions the spot fails). Saved views keep the conditions. Each window's rectangle goes to the label
+  airport, port, and which Find conditions the spot fails). Saved views keep the conditions.
+- **Filters** (`layers::Filters`, F3). The website's filter panel: power lines and substations by
+  voltage band, power stations by fuel, 2026 ward winners by party, turnout band and province. What
+  fails is dimmed in the mesh and icon passes, or left out with "hide". Filters are saved settings. Each window's rectangle goes to the label
   engine as a blocker.
 - **Command line** (`commands.cpp`). An UPPERCASE first word or a leading `:` is a command (`GO`, `ADD`,
   `RM`, `HIDE`, `FIND`, `RANK`, `SAVE`, `VIEW` ...); `name CODE` finds the subject and runs the function

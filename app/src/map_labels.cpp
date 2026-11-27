@@ -59,8 +59,10 @@ void grid(const TileOnScreen& t, const layers::MapStyle& ms, double zoom, const 
       const bool station = f.str("kind") == "power_station";
       if (station ? !ms.plants : !ms.subs) continue;
       const double kv = f.num("kv").value_or(0), mw = f.num("mw").value_or(0);
+      const bool pass = station ? layers::pass_fuel(ms.filter, f.str("fuel")) : layers::pass_volt(ms.filter, kv);
+      if (!pass && ms.filter.hide) continue;
       const double minz = station ? (mw >= 500 ? 4.0 : mw >= 50 ? 6.0 : 7.5) : (kv >= 275 ? 5.5 : kv >= 132 ? 7.0 : 8.0);
-      const float opacity = fade(zoom, minz);
+      const float opacity = fade(zoom, minz) * (pass ? 1.0f : 0.2f);
       if (opacity <= 0) continue;
       text::PointLabel c;
       c.key = "f:" + f.str("id");
@@ -96,7 +98,7 @@ void grid(const TileOnScreen& t, const layers::MapStyle& ms, double zoom, const 
       ++fi;
       if (f.type != mvt::GeomType::Line) continue;
       const double kv = f.num("kv").value_or(0);
-      if (kv < 132 || f.num("inferred").value_or(0) > 0) continue;
+      if (kv < 132 || f.num("inferred").value_or(0) > 0 || !layers::pass_volt(ms.filter, kv)) continue;
       const double minz = kv >= 400 ? 7.0 : kv >= 220 ? 8.0 : 9.0;
       const float opacity = fade(zoom, minz);
       if (opacity <= 0) continue;

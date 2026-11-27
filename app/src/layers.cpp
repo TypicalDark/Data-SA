@@ -222,6 +222,52 @@ std::string mvt_name(const std::string& id) {
   return n;
 }
 
+const char* const kVoltBins[6] = {"400 kV and up", "220 to 399", "100 to 219", "50 to 99", "under 50", "untagged"};
+const char* const kTurnBins[5] = {"under 30%", "30 to 40%", "40 to 50%", "50 to 60%", "60%+"};
+const char* const kProvinces[9] = {"KZN", "EC", "LIM", "GT", "WC", "NW", "MP", "FS", "NC"};
+
+const std::vector<std::pair<std::string, std::string>>& fuels() {
+  static const std::vector<std::pair<std::string, std::string>> f = {
+      {"coal", "coal"},   {"gas", "gas"},         {"nuclear", "nuclear"}, {"hydro", "hydro"},
+      {"solar", "solar"}, {"wind", "wind"},       {"biomass", "biomass and biogas"},
+      {"battery", "battery"}, {"diesel", "diesel and oil"}, {"other", "other"}};
+  return f;
+}
+
+const std::vector<std::string>& top_parties() {
+  static const std::vector<std::string> p = {"ANC", "DA", "MK", "IFP", "EFF", "ActionSA", "PA", "other"};
+  return p;
+}
+
+int volt_bin(double kv) { return kv <= 0 ? 5 : kv >= 400 ? 0 : kv >= 220 ? 1 : kv >= 100 ? 2 : kv >= 50 ? 3 : 4; }
+
+int turn_bin(double pct) { return pct < 30 ? 0 : pct < 40 ? 1 : pct < 50 ? 2 : pct < 60 ? 3 : 4; }
+
+std::string fuel_key(const std::string& fuel) {
+  std::string s = fuel;
+  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+  if (s == "oil") return "diesel";
+  if (s == "biogas") return "biomass";
+  for (const auto& [k, l] : fuels())
+    if (k == s) return s;
+  return "other";
+}
+
+bool pass_volt(const Filters& f, double kv) { return f.volt.empty() || f.volt.count(volt_bin(kv)); }
+
+bool pass_fuel(const Filters& f, const std::string& fuel) { return f.fuel.empty() || f.fuel.count(fuel_key(fuel)); }
+
+bool pass_ward(const Filters& f, const std::string& party, double turnout, const std::string& muni) {
+  if (!f.party.empty()) {
+    const auto& top = top_parties();
+    const bool known = std::find(top.begin(), top.end(), party) != top.end() && party != "other";
+    if (!f.party.count(known ? party : "other")) return false;
+  }
+  if (!f.turn.empty() && (turnout < 0 || !f.turn.count(turn_bin(turnout)))) return false;
+  if (!f.prov.empty() && !f.prov_munis.count(muni)) return false;
+  return true;
+}
+
 std::string raster_pack(const std::string& id) {
   static const std::set<std::string> raster = {"relief", "x:fire", "x:flood", "x:ships", "x:farms", "x:rain12", "x:rainn",
                                              "x:pvout", "x:ghi", "x:roof"};

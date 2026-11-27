@@ -96,8 +96,21 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
 
   const auto& sd = settings_->data();
   side_open_ = sd.value("side_open", true);
-  if (opt_.screenshot.empty()) {
+  if (opt_.screenshot.empty() || !opt_.settings_path.empty()) {  // screenshots read an explicit settings file
     rules_ = find::rules_from(sd.value("find_rules", json::array()));
+    if (sd.contains("filter") && sd["filter"].is_object()) {
+      const auto& j = sd["filter"];
+      try {
+        filter_.volt = j.value("volt", std::set<int>{});
+        filter_.fuel = j.value("fuel", std::set<std::string>{});
+        filter_.party = j.value("party", std::set<std::string>{});
+        filter_.turn = j.value("turn", std::set<int>{});
+        filter_.prov = j.value("prov", std::set<std::string>{});
+        filter_.hide = j.value("hide", false);
+      } catch (const std::exception&) {
+        filter_ = {};
+      }
+    }
     rank_key_ = sd.value("rank", rank_key_);
   }
   if (opt_.screenshot.empty() && sd.contains("topic")) set_topic(sd.value("topic", "start"));
@@ -121,6 +134,7 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
       open_panel(Panel::Find);
     } else if (p == "find") open_panel(Panel::Find);
     else if (p == "list") open_panel(Panel::List);
+    else if (p == "filter") open_panel(Panel::Filter);
     else if (p == "areas") open_panel(Panel::Areas);
     else if (p == "views") open_panel(Panel::Views);
     else if (p == "watch") open_panel(Panel::Watch);
@@ -360,6 +374,7 @@ void App::poll_async() {
       try {
         fdata_ = find::parse(*j);
         set_rules(rules_);
+        set_filter(filter_);  // provinces need the municipality list
         if (!find_toast_.empty()) toast(find_toast_ + ": " + std::to_string(fpass_.size()) + " municipalities match");
         find_toast_.clear();
       } catch (const std::exception& e) {
@@ -442,6 +457,9 @@ layers::MapStyle App::map_style_now() const {
   auto ms = layers::map_style(lstate_);
   ms.find_on = fdata_ && !rules_.empty();
   if (ms.find_on) ms.find_pass = fpass_;
+  ms.filter = filter_;
+  // ward filters: municipal winners under the wards would show through where wards are hidden
+  if (filter_.vote_on() && lstate_.shows("c:ward") && !lstate_.shows("c:muni")) ms.fill = style::Topic::Overview;
   return ms;
 }
 
@@ -450,6 +468,23 @@ void App::set_rules(std::vector<find::Rule> r) {
   fpass_ = fdata_ ? find::run(*fdata_, rules_) : std::set<std::string>{};
   if (opt_.screenshot.empty()) {
     settings_->data()["find_rules"] = find::to_json(rules_);
+    settings_->save();
+  }
+}
+
+void App::set_filter(const layers::Filters& f) {
+  filter_ = f;
+  filter_.prov_munis.clear();
+  if (fdata_)
+    for (const auto& m : fdata_->munis) {
+      // the Find data uses KZN, EC, LP, GT, WC, NW, MP, FS, NC; the website's filter says LIM
+      const std::string p = m.prov == "LP" ? "LIM" : m.prov;
+      if (filter_.prov.count(p)) filter_.prov_munis.insert(m.code);
+    }
+  if (opt_.screenshot.empty()) {
+    auto& j = settings_->data()["filter"];
+    j = json{{"volt", filter_.volt}, {"fuel", filter_.fuel}, {"party", filter_.party},
+             {"turn", filter_.turn}, {"prov", filter_.prov}, {"hide", filter_.hide}};
     settings_->save();
   }
 }
@@ -829,6 +864,10 @@ bool App::run_command(const std::string& line) {
     find_rank_ = true;
     panel_ = Panel::Find;
     side_open_ = true;
+  } else if (c == "FILTER") {
+    panel_ = Panel::Filter;
+    side_open_ = true;
+    filter_vote_tab_ = a == "vote" || a == "party" || (a.empty() && lstate_.topic == "vote");
   } else if (c == "LIST") {
     panel_ = Panel::List;
     side_open_ = true;
@@ -951,6 +990,7 @@ void App::handle_input() {
     if (ImGui::IsKeyPressed(ImGuiKey_W, false) && shift) open_panel(Panel::Watch);
     if (ImGui::IsKeyPressed(ImGuiKey_KeypadMultiply, false) || (shift && ImGui::IsKeyPressed(ImGuiKey_8, false))) watch_current();
     if (ImGui::IsKeyPressed(ImGuiKey_F2, false)) catalogue_open_ = !catalogue_open_;
+    if (ImGui::IsKeyPressed(ImGuiKey_F3, false)) open_panel(Panel::Filter);
     if (ImGui::IsKeyPressed(ImGuiKey_F4, false)) open_panel(Panel::List);
     if (ImGui::IsKeyPressed(ImGuiKey_F6, false)) open_panel(Panel::Views);
     if (ImGui::IsKeyPressed(ImGuiKey_F7, false)) open_panel(Panel::Measure);

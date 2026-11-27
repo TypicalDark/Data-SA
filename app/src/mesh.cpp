@@ -108,7 +108,10 @@ void build(const std::string& pack, const mvt::Tile& tile, const layers::MapStyl
             if (e.mode == layers::Extra::Outline) {
               outline(f, 0.45f, with_alpha(base, 0.8f), 0, out.lines);
             } else if (e.mode == layers::Extra::Party) {
-              add_polygon(f, style::party(f.str("party"), 0.8f).packed(), out.fill);
+              const bool pass = !ms.filter.vote_on() ||
+                                layers::pass_ward(ms.filter, f.str("party"), f.num("turnout").value_or(-1), f.str("muni"));
+              if (!pass && ms.filter.hide) break;
+              add_polygon(f, style::party(f.str("party"), pass ? 0.8f : 0.1f).packed(), out.fill);
               outline(f, 0.3f, style::hex("#0b161d", 0.6f).packed(), 8.0f, out.lines);
             } else {
               add_polygon(f, with_alpha(base, 0.26f), out.fill);
@@ -143,8 +146,10 @@ void build(const std::string& pack, const mvt::Tile& tile, const layers::MapStyl
         if (f.type != mvt::GeomType::Line) continue;
         const double kv = f.num("kv").value_or(0);
         const bool inferred = f.num("inferred").value_or(0) > 0;
+        const bool pass = layers::pass_volt(ms.filter, kv);
+        if (!pass && ms.filter.hide) continue;
         auto c = inferred ? style::hex("#7d8b97", 0.9f) : style::volt(kv);
-        c.a = uint8_t(c.a * 0.92f);
+        c.a = uint8_t(c.a * (pass ? 0.92f : 0.12f));
         for (const auto& part : f.parts) add_line(part, style::line_width_px(kv, true) * 0.5f, c.packed(), kv_minz(kv), inferred, out.lines);
       }
     }

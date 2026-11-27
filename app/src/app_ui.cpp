@@ -390,7 +390,7 @@ void App::ui_main(float x, float y, float w, float h) {
         }
         break;
       }
-      case Panel::Filter: ui_panel_later("Filter", "Filter what is drawn by its values: voltage, MW, party, value bands.", "C"); break;
+      case Panel::Filter: ui_panel_filter(); break;
       case Panel::Layers: ui_panel_later("Layers", "Layer settings.", "C"); break;
       case Panel::Live: ui_panel_later("Live", "Live planes and ships, and load shedding, through the back-end.", "F"); break;
       case Panel::Reach: ui_panel_later("Reach", "How far you get by car, transit, walking or cycling.", "F"); break;

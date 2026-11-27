@@ -180,6 +180,10 @@ class App {
   std::set<std::string> fpass_;
   std::string rank_key_ = "subs";
   std::string find_toast_;
+  layers::Filters filter_;
+  bool filter_vote_tab_ = false;
+  void set_filter(const layers::Filters& f);
+  void ui_panel_filter();
   void set_rules(std::vector<find::Rule> r);
   layers::MapStyle map_style_now() const;
   char view_name_[64] = {};
