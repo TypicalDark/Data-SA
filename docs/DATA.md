@@ -1,8 +1,8 @@
 # Data rules
 
-The data store (raw archive, PostGIS, exporters) is specified in
-`grid-of-sa/datastore/DATA_ARCHITECTURE.md` in the project files. This repository reads only its
-exports.
+The data store (raw archive, PostGIS, exporters) lives in `datastore/` and is specified in
+[`datastore/DATA_ARCHITECTURE.md`](../datastore/DATA_ARCHITECTURE.md). The back-end reads only its
+exports: a release folder made by `datastore/export/build_packs.py`.
 
 ## Packs the back-end reads
 
@@ -10,12 +10,36 @@ exports.
 |---|---|---|---|
 | `admin` | PMTiles, MVT | `export_tiles.py --pack admin` | province, district, municipality, ward, suburb, label |
 | `grid` | PMTiles, MVT | `export_tiles.py --pack grid` | line, facility |
-| `parcels`, `parcels-<prov>` | PMTiles, MVT | `export_tiles.py --pack parcels` | parcel |
+| `parcels-<prov>` (`parcels-wc`, `parcels-gt`, ...) | PMTiles, MVT | `export_tiles.py --pack parcels` | parcel, z13-16, one pack per province (`region` in installed.json) |
 | `h3`, `places` | PMTiles, MVT | `export_tiles.py` | hex, place |
 | `web-grid`, `web-water`, `web-risk`, `web-nature`, `web-vote`, `web-prop`, `web-land`, `web-places`, `web-move` | PMTiles, MVT | `tools/webpack/build_web_packs.py` | the website map's layers, one vector layer per website layer id (`x:pa` is `x_pa`) |
 | `raster-relief`, `raster-fire`, ... (ten) | PMTiles, PNG | `tools/webpack/build_raster_packs.py` | the website's images as 256 px tiles |
 | `find` | JSON | the website's `data/x/find.json`, copied | municipalities (outline, people, area, median value, ward winners), NTCSA free capacity, dams, airports, ports, power stations, towns; served at `/v1/data/find` |
-| `pack` | SQLite, `gsa-pack/1` | `export_pack.py` | tree, metric, parcel, valuation, node, edge, series, value, source, snapshot, search (FTS5), pack_info |
+| `pack` | SQLite, `gsa-pack/1` | `export_pack.py` | tree, metric, parcel, valuation, node, edge, series, series_data, source, snapshot, search (FTS5), pack_info |
+
+## Release folder, manifest and installed.json
+
+`build_packs.py RELEASE --tiles TILES_DIR --pack pack.sqlite --add web-*.pmtiles raster-*.pmtiles find.json`
+writes:
+
+```
+RELEASE/manifest.json            gsa-manifest/1  what the updater downloads
+RELEASE/packs/installed.json     gsa-installed/1 what PackStore reads
+RELEASE/packs/<id>/<id>-<version>.<ext>
+```
+
+Each pack entry has `kind` (`tiles`, `sqlite`, `json`), `version`, `file` (relative to `packs/`),
+`bytes`, `sha256`, and for tiles `tile_type` (`mvt` or `png`), zooms and bounds; split packs add
+`region`. Versions are `<YYYYMMDD>-<sha256 prefix>` and are kept from `--previous` when the bytes did
+not change, so the updater skips unchanged packs. `manifest.json` adds `url` and `changed` per pack;
+signing (an ed25519 signature over the manifest) comes with roadmap step 11. A release folder is a
+complete data directory: `gsa-backend --data RELEASE` serves it.
+
+## Time series in the pack
+
+`series_data(series_id, t0, step, n, v)` stores each series as one row: `v` is little-endian float32,
+one value per `step` from `t0`, NaN where missing. The 21 million monthly climate values take about
+90 MB this way instead of 1 GB as rows, and `/v1/series` returns a whole chart in one read.
 
 ## Privacy (POPIA)
 
@@ -51,6 +75,7 @@ winners, the power grid). It has no wards, suburbs or plots. See `devdata/README
 ## Known tool issue
 
 tippecanoe 2.49 as packaged in Ubuntu 24.04 keeps only one feature per tile when features carry a
-per-feature `"tippecanoe": {"minzoom": n}` member. The development pack therefore stores `minzoom` as a
-property and the app applies zoom gates itself. Check `export_tiles.py` output with
-`tippecanoe-decode` before relying on per-feature zoom members.
+per-feature `"tippecanoe": {"minzoom": n}` member. Neither the development pack nor `export_tiles.py`
+uses it: `export_tiles.py` groups each layer's features into zoom bands, runs tippecanoe once per band
+and merges the bands with tile-join. Every feature also carries its band's `minzoom` as a property, so
+the app can gate drawing itself.

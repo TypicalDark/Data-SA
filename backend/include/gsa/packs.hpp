@@ -25,6 +25,8 @@ struct PackInfo {
   std::string version;
   std::filesystem::path file;
   uint64_t bytes = 0;
+  std::string sha256;  // from installed.json (the updater checked it on download); empty in dev mode
+  std::string region;  // province code for split packs ("WC" for parcels-wc), empty for national packs
 };
 
 // An immutable view of what is installed. Requests take a snapshot and keep it for

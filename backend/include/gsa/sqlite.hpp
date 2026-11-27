@@ -31,6 +31,7 @@ class Row {
   int64_t i64(int i) const;
   double f64(int i) const;
   std::string text(int i) const;
+  std::string blob(int i) const;  // raw bytes of a BLOB column
   std::optional<double> opt_f64(int i) const;
   std::optional<std::string> opt_text(int i) const;
 

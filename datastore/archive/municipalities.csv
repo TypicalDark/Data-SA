@@ -1,0 +1,214 @@
+code,name,province,website
+BUF,Buffalo City,EC,www.buffalocity.gov.za
+CPT,City of Cape Town,WC,www.capetown.gov.za
+EC101,Dr Beyers Naude,EC,www.bnlm.gov.za
+EC102,Blue Crane Route,EC,www.bcrm.gov.za
+EC104,Makana,EC,www.makana.gov.za
+EC105,Ndlambe,EC,www.ndlambe.co.za
+EC106,Sundays River Valley,EC,www.srvm.co.za
+EC108,Kouga,EC,www.kouga.gov.za
+EC109,Kou-Kamma,EC,koukamma.gov.za
+EC121,Mbhashe,EC,www.mbhashemun.gov.za
+EC122,Mnquma,EC,www.mnquma.gov.za
+EC123,Great Kei,EC,www.greatkeilm.gov.za
+EC124,Amahlathi,EC,www.amahlathi.gov.za
+EC126,Ngqushwa,EC,www.ngqushwamun.gov.za
+EC129,Raymond Mhlaba,EC,www.raymondmhlaba.gov.za
+EC131,Inxuba Yethemba,EC,www.inxubayethemba.com
+EC135,Intsika Yethu,EC,www.intsikayethu.gov.za
+EC136,Emalahleni,EC,www.emalahlenilm.gov.za
+EC137,Engcobo,EC,www.engcobolm.gov.za
+EC138,Sakhisizwe,EC,www.sakhisizwe.gov.za
+EC139,Enoch Mgijima,EC,www.enochmgijima.gov.za
+EC141,Elundini,EC,www.elundini.gov.za
+EC142,Senqu,EC,www.senqu.gov.za
+EC145,Walter Sisulu,EC,www.wslm.gov.za
+EC153,Ngquza Hill,EC,www.ihlm.gov.za
+EC154,Port St Johns,EC,www.psjlm.co.za
+EC155,Nyandeni,EC,www.nyandenilm.gov.za
+EC156,Mhlontlo,EC,www.mhlontlolm.gov.za
+EC157,King Sabata Dalindyebo,EC,www.ksd.org.za
+EC441,Matatiele,EC,www.matatiele.gov.za
+EC442,Umzimvubu,EC,www.umzimvubu.org.za
+EC443,Mbizana,EC,www.mbizana.gov.za
+EC444,Ntabankulu,EC,www.ntabankulu.gov.za
+EKU,Ekurhuleni,GT,www.ekurhuleni.gov.za
+ETH,eThekwini,KZN,www.durban.gov.za
+FS161,Letsemeng,FS,www.letsemeng.gov.za
+FS162,Kopanong,FS,www.kopanong.gov.za
+FS163,Mohokare,FS,www.mohokare.gov.za
+FS181,Masilonyana,FS,www.masilonyana.local.gov.za
+FS182,Tokologo,FS,tokologo.org.za
+FS183,Tswelopele,FS,www.tswelopele.gov.za
+FS184,Matjhabeng,FS,www.matjhabeng.fs.gov.za
+FS185,Nala,FS,www.nala.org.za
+FS191,Setsoto,FS,www.setsoto.gov.za
+FS192,Dihlabeng,FS,www.dihlabeng.co.za
+FS193,Nketoana,FS,www.nketoanafs.gov.za
+FS194,Maluti a Phofung,FS,www.map.gov.za
+FS195,Phumelela,FS,www.phumelelamun.co.za
+FS196,Mantsopa,FS,www.mantsopa.fs.gov.za
+FS201,Moqhaka,FS,www.moqhaka.gov.za
+FS203,Ngwathe,FS,www.ngwathe.fs.gov.za
+FS204,Metsimaholo,FS,www.metsimaholo.gov.za
+FS205,Mafube,FS,www.mafubemunicipality.gov.za
+GT421,Emfuleni,GT,www.emfuleni.gov.za
+GT422,Midvaal,GT,www.midvaal.gov.za
+GT423,Lesedi,GT,lesedi-lm.gauteng.gov.za
+GT481,Mogale City,GT,www.mogalecity.gov.za
+GT484,Merafong City,GT,www.merafong.co.za
+GT485,Rand West City,GT,www.randwestcity.gov.za
+JHB,City of Johannesburg,GT,www.joburg.org.za
+KZN212,Umdoni,KZN,www.umdoni.gov.za
+KZN213,Umzumbe,KZN,www.umzumbe.gov.za
+KZN214,uMuziwabantu,KZN,www.umuziwabantu.gov.za
+KZN216,Ray Nkonyeni,KZN,rnm.gov.za
+KZN221,uMshwathi,KZN,www.umshwathi.gov.za
+KZN222,uMngeni,KZN,www.umngeni.gov.za
+KZN223,Mpofana,KZN,www.mpofana.gov.za
+KZN224,Impendle,KZN,www.impendle.gov.za
+KZN225,The Msunduzi,KZN,www.msunduzi.gov.za
+KZN226,Mkhambathini,KZN,www.mkhambathini.gov.za
+KZN227,Richmond,KZN,www.richmond.gov.za
+KZN235,Okhahlamba,KZN,www.okhahlamba.gov.za
+KZN237,Inkosi Langalibalele,KZN,www.ilm.gov.za
+KZN238,Alfred Duma,KZN,www.alfredduma.gov.za
+KZN241,Endumeni,KZN,www.endumeni.gov.za
+KZN242,Nqutu,KZN,www.nquthu.gov.za
+KZN244,Msinga,KZN,www.umsinga.gov.za
+KZN245,Umvoti,KZN,www.umvoti.gov.za
+KZN252,Newcastle,KZN,www.newcastle.gov.za
+KZN253,Emadlangeni,KZN,www.emadlangeni.gov.za
+KZN254,Dannhauser,KZN,www.dannhauser.gov.za
+KZN261,eDumbe,KZN,www.edumbe.gov.za
+KZN262,uPhongolo,KZN,www.uphongolo.gov.za
+KZN263,Abaqulusi,KZN,www.abaqulusi.gov.za
+KZN265,Nongoma,KZN,www.nongoma.org.za
+KZN266,Ulundi,KZN,www.ulundi.gov.za
+KZN271,Umhlabuyalingana,KZN,www.umhlabuyalingana.gov.za
+KZN272,Jozini,KZN,www.jozini.gov.za
+KZN275,Mtubatuba,KZN,www.mtubatuba.org.za
+KZN276,Big Five Hlabisa,KZN,www.big5hlabisa.gov.za
+KZN281,Mfolozi,KZN,www.umfolozi.gov.za
+KZN282,uMhlathuze,KZN,www.umhlathuze.org.za
+KZN284,uMlalazi,KZN,www.umlalazi.gov.za
+KZN285,Mthonjaneni,KZN,www.mthonjaneni.org.za
+KZN286,Nkandla,KZN,www.nkandla.gov.za
+KZN291,Mandeni,KZN,www.mandeni.gov.za
+KZN292,KwaDukuza,KZN,www.kwadukuza.gov.za
+KZN293,Ndwedwe,KZN,www.ndwedwe.gov.za
+KZN294,Maphumulo,KZN,www.maphumuloonline.gov.za
+KZN433,Greater Kokstad,KZN,www.kokstad.org.za
+KZN434,Ubuhlebezwe,KZN,www.jppmunicipality.gov.za
+KZN435,Umzimkhulu,KZN,www.umzimkhululm.gov.za
+KZN436,Dr Nkosazana Dlamini Zuma,KZN,www.ndz.gov.za
+LIM331,Greater Giyani,LIM,www.greatergiyani.gov.za
+LIM332,Greater Letaba,LIM,www.greaterletaba.gov.za
+LIM333,Greater Tzaneen,LIM,www.tzaneen.gov.za
+LIM334,Ba-Phalaborwa,LIM,www.ba-phalaborwa.gov.za
+LIM335,Maruleng,LIM,www.maruleng.gov.za
+LIM341,Musina,LIM,www.musina.co.za
+LIM343,Thulamela,LIM,www.thulamela.gov.za
+LIM344,Makhado,LIM,www.makhado.gov.za
+LIM345,Collins Chabane,LIM,www.collinschabane.gov.za
+LIM351,Blouberg,LIM,www.blouberg.gov.za
+LIM353,Molemole,LIM,www.molemole.gov.za
+LIM354,Polokwane,LIM,www.polokwane.gov.za
+LIM355,Lepele-Nkumpi,LIM,www.lepelle-nkumpi.gov.za
+LIM361,Thabazimbi,LIM,www.thabazimbi.gov.za
+LIM362,Lephalale,LIM,www.lephalale.gov.za
+LIM366,Bela-Bela,LIM,www.belabela.gov.za
+LIM367,Mogalakwena,LIM,www.mogalakwena.gov.za
+LIM368,Modimolle-Mookgophong,LIM,www.mmlm.gov.za
+LIM471,Ephraim Mogale,LIM,www.ephraimmogalelm.gov.za
+LIM472,Elias Motsoaledi,LIM,www.eliasmotsoaledi.gov.za
+LIM473,Makhuduthamaga,LIM,www.makhuduthamaga.gov.za
+LIM476,Fetakgomo Tubatse,LIM,www.fttlm.gov.za
+MAN,Mangaung,FS,www.mangaung.co.za
+MP301,Chief Albert Luthuli,MP,www.albertluthuli.gov.za
+MP302,Msukaligwa,MP,www.msukaligwa.gov.za
+MP303,Mkhondo,MP,www.mkhondo.gov.za
+MP304,Dr Pixley Ka Isaka Seme,MP,www.pixleykaseme.gov.za
+MP305,Lekwa,MP,www.lekwalm.gov.za
+MP306,Dipaleseng,MP,www.dipaleseng.gov.za
+MP307,Govan Mbeki,MP,www.govanmbeki.gov.za
+MP311,Victor Khanye,MP,www.delmasmunic.co.za
+MP312,Emalahleni,MP,www.emalahleni.gov.za
+MP313,Steve Tshwete,MP,www.stlm.gov.za
+MP314,Emakhazeni,MP,www.emakhazenilm.co.za
+MP315,Thembisile,MP,www.thembisilehanilm.gov.za
+MP316,Dr JS Moroka,MP,www.drjsmlm.gov.za
+MP321,Thaba Chweu,MP,www.thabachweumun.gov.za
+MP324,Nkomazi,MP,www.nkomazi.gov.za
+MP325,Bushbuckridge,MP,www.bushbuckridge.gov.za
+MP326,City of Mbombela,MP,www.mbombela.gov.za
+NC061,Richtersveld,NC,www.richtersveld.gov.za
+NC062,Nama Khoi,NC,www.namakhoi.gov.za
+NC064,Kamiesberg,NC,www.kamiesberg.gov.za
+NC065,Hantam,NC,www.hantam.gov.za
+NC066,Karoo Hoogland,NC,www.karoohoogland.gov.za
+NC067,Khâi-Ma,NC,www.khaima.gov.za
+NC071,Ubuntu,NC,www.ubuntu.gov.za
+NC072,Umsobomvu,NC,www.umsobomvumun.co.za
+NC073,Emthanjeni,NC,www.emthanjeni.co.za
+NC074,Kareeberg,NC,www.kareeberg.co.za
+NC075,Renosterberg,NC,www.renosterberg.gov.za
+NC076,Thembelihle,NC,www.thembelihlemunicipality.gov.za
+NC077,Siyathemba,NC,www.siyathemba.gov.za
+NC078,Siyancuma,NC,www.siyancuma.gov.za
+NC082,Kai !Garib,NC,www.kaigarib.gov.za
+NC084,!Kheis,NC,www.kheismun.co.za
+NC085,Tsantsabane,NC,www.tsantsabane.gov.za
+NC086,Kgatelopele,NC,www.kgatelopele.gov.za
+NC087,Dawid Kruiper,NC,www.dkm.gov.za
+NC091,Sol Plaatje,NC,www.solplaatje.org.za
+NC092,Dikgatlong,NC,www.dikgatlong.gov.za
+NC093,Magareng,NC,www.magareng.gov.za
+NC094,Phokwane,NC,www.phokwane.gov.za
+NC451,Joe Morolong,NC,www.joemorolong.gov.za
+NC452,Ga-Segonyana,NC,www.ga-segonyana.gov.za
+NC453,Gamagara,NC,www.gamagara.gov.za
+NMA,Nelson Mandela Bay,EC,www.nelsonmandelabay.gov.za
+NW371,Moretele,NW,www.moretele.gov.za
+NW372,Local Municipality of Madibeng,NW,www.madibeng.gov.za
+NW373,Rustenburg,NW,www.rustenburg.gov.za
+NW374,Kgetlengrivier,NW,www.kgetleng.gov.za
+NW375,Moses Kotane,NW,www.moseskotane.gov.za
+NW381,Ratlou,NW,ratlou.gov.za
+NW382,Tswaing,NW,www.tswaing.gov.za
+NW383,Mafikeng,NW,www.mafikeng.gov.za
+NW384,Ditsobotla,NW,www.ditsobotla.co.za
+NW385,Ramotshere Moiloa,NW,www.ramotshere.gov.za
+NW392,Naledi,NW,www.naledilm.co.za
+NW393,Mamusa,NW,www.mamusalm.co.za
+NW394,Greater Taung,NW,www.gtlm.gov.za
+NW396,Lekwa-Teemane,NW,www.lekwateemane.co.za
+NW397,Kagisano/Molopo,NW,www.kmlm.gov.za
+NW403,City of Matlosana,NW,www.matlosana.org.za
+NW404,Maquassi Hills,NW,www.maquassihills.co.za
+NW405,JB Marks,NW,www.jbmarks.gov.za
+TSH,City of Tshwane,GT,www.tshwane.gov.za
+WC011,Matzikama,WC,www.matzikama.gov.za
+WC012,Cederberg,WC,www.cederbergmun.gov.za
+WC013,Bergrivier,WC,www.bergmun.org.za
+WC014,Saldanha Bay,WC,www.sbm.gov.za
+WC015,Swartland,WC,www.swartland.org.za
+WC022,Witzenberg,WC,www.witzenberg.gov.za
+WC023,Drakenstein,WC,www.drakenstein.gov.za
+WC024,Stellenbosch,WC,www.stellenbosch.gov.za
+WC025,Breede Valley,WC,www.bvm.gov.za
+WC026,Langeberg,WC,www.langeberg.gov.za
+WC031,Theewaterskloof,WC,www.twk.gov.za
+WC032,Overstrand,WC,www.overstrand.gov.za
+WC033,Cape Agulhas,WC,www.capeagulhas.gov.za
+WC034,Swellendam,WC,www.swellenmun.co.za
+WC041,Kannaland,WC,www.kannaland.gov.za
+WC042,Hessequa,WC,www.hessequa.gov.za
+WC043,Mossel Bay,WC,www.mosselbay.gov.za
+WC044,George,WC,www.george.gov.za
+WC045,Oudtshoorn,WC,www.oudtmun.gov.za
+WC047,Bitou,WC,www.bitou.gov.za
+WC048,Knysna,WC,www.knysna.gov.za
+WC051,Laingsburg,WC,www.laingsburg.gov.za
+WC052,Prince Albert,WC,www.pamun.gov.za
+WC053,Beaufort West,WC,www.beaufortwestmun.co.za

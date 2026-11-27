@@ -26,6 +26,10 @@ struct ApiConfig {
 // Adds every /v1 route and the auth check to the server.
 void mount_api(httplib::Server& srv, ApiConfig cfg);
 
+// Routes over the SQLite pack's plot, time series and grid graph tables (api_data.cpp).
+// Called by mount_api; auth and CORS come from mount_api's pre-routing handler.
+void mount_data_api(httplib::Server& srv, std::shared_ptr<PackStore> store);
+
 // Turns free text into a safe FTS5 query: each word becomes a quoted prefix term.
 // Returns empty when nothing searchable is left.
 std::string fts_query(const std::string& q);

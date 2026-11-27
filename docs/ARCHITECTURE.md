@@ -21,7 +21,13 @@ that should sync later (saved views, watchlists) will go through the API.
   `*.pmtiles` plus `pack.sqlite` in `packs/`. It hands out immutable snapshots: a request keeps its
   snapshot, so a pack swap never pulls a file out from under it. `reload()` swaps atomically and keeps
   the old set when the new one fails to load.
-- Pack files must stay inside `packs/`; pack ids are `[a-z0-9][a-z0-9_-]{0,63}`.
+- Pack files must stay inside `packs/`; pack ids are `[a-z0-9][a-z0-9_-]{0,63}`. `installed.json` is
+  `gsa-installed/1` (see docs/DATA.md); it carries each pack's `sha256` and, for split packs, `region`,
+  and `/v1/packs` repeats both.
+- Plot cards, time series and the grid graph (`api_data.cpp`): `/v1/parcels/{sg21}`, `/v1/series`,
+  `/v1/graph/{network}/nodes/{id}` and `/v1/trace` (modes connected, path, feed, fail). The graph is
+  built in memory from the pack's `node` and `edge` tables on first use (`graph.cpp`, about 20,000 lines
+  for the national grid) and cached per pack snapshot, so a pack swap rebuilds it.
 - SQLite pack schema is versioned (`pack_info.format = gsa-pack/1`). The back-end lists the schemas it
   reads in `/v1/version`; it refuses a pack it cannot read and says to update the app first.
 - Auth: `Authorization: Bearer <token>` on every route but `/v1/health`. The token comes from the

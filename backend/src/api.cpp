@@ -30,6 +30,8 @@ std::string lower(std::string s) {
 
 json pack_json(const PackInfo& p, const PackSet& set) {
   json j{{"id", p.id}, {"kind", p.kind}, {"version", p.version}, {"bytes", p.bytes}};
+  if (!p.sha256.empty()) j["sha256"] = p.sha256;
+  if (!p.region.empty()) j["region"] = p.region;
   if (p.kind != "tiles") return j;
   const auto& a = *set.tiles.at(p.id);
   const auto& h = a.header();
@@ -344,6 +346,8 @@ void mount_api(httplib::Server& srv, ApiConfig cfg) {
     res.set_header("Cache-Control", "private, max-age=3600");
     res.set_content(*it->second, "application/json");
   });
+
+  mount_data_api(srv, ctx->cfg.store);  // plots, time series, grid graph (api_data.cpp)
 
   srv.Get("/v1/search", [ctx](const httplib::Request& req, httplib::Response& res) { handle_search(*ctx, req, res); });
 

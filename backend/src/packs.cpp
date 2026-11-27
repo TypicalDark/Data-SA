@@ -57,13 +57,16 @@ std::shared_ptr<const PackSet> PackStore::load() const {
   if (fs::exists(manifest)) {
     std::ifstream in(manifest);
     const auto j = nlohmann::json::parse(in);
+    if (j.value("format", "gsa-installed/1") != "gsa-installed/1")
+      throw std::runtime_error("installed.json has format " + j.value("format", "") + ", which this back-end cannot read");
     for (const auto& [id, p] : j.at("packs").items()) {
       if (!valid_pack_id(id)) throw std::runtime_error("bad pack id in installed.json: " + id);
       const fs::path file = (packs / p.at("file").get<std::string>()).lexically_normal();
       // the file must stay inside packs/
       const auto rel = file.lexically_relative(packs);
       if (rel.empty() || *rel.begin() == "..") throw std::runtime_error("pack file outside packs/: " + id);
-      found.push_back({id, p.at("kind").get<std::string>(), p.value("version", "unknown"), file, 0});
+      found.push_back({id, p.at("kind").get<std::string>(), p.value("version", "unknown"), file, 0,
+                       p.value("sha256", ""), p.value("region", "")});
     }
   } else if (fs::exists(packs)) {
     // Development: every *.pmtiles is a tile pack named after its file; pack.sqlite is the attribute pack.
