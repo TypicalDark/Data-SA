@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <chrono>
 #include <set>
 
 #include "shaders/map_frag.h"
@@ -60,6 +61,9 @@ constexpr int kImageUploadsPerFrame = 12;  // spread big jumps over a few frames
 }  // namespace
 
 MapRenderer::MapRenderer(vk::Context& ctx) : ctx_(ctx), text_(ctx) {
+  style_ptr_ = std::make_shared<const layers::MapStyle>(style_);
+  const unsigned hw = std::max(2u, std::thread::hardware_concurrency());
+  for (unsigned i = 0; i < std::min(4u, hw - 1); ++i) mesh_threads_.emplace_back([this] { mesh_worker(); });
   const VkDevice dev = ctx.device();
   VkShaderModule vs = ctx.shader(map_vert, sizeof(map_vert)), fs = ctx.shader(map_frag, sizeof(map_frag));
 
@@ -211,6 +215,12 @@ void MapRenderer::init_raster_pipeline() {
 }
 
 MapRenderer::~MapRenderer() {
+  {
+    std::lock_guard<std::mutex> lk(mesh_mu_);
+    mesh_stop_ = true;
+  }
+  mesh_cv_.notify_all();
+  for (auto& t : mesh_threads_) t.join();
   const VkDevice dev = ctx_.device();
   vkDeviceWaitIdle(dev);
   for (auto& [k, g] : tiles_) {
@@ -314,13 +324,59 @@ void MapRenderer::upload_image(VkCommandBuffer cmd, GpuTile& g) {
   g.raster.reset();  // the pixels live on the GPU now
 }
 
-void MapRenderer::upload(const TileKey& k, GpuTile& g) {
+void MapRenderer::mesh_worker() {
+  for (;;) {
+    MeshJob j;
+    {
+      std::unique_lock<std::mutex> lk(mesh_mu_);
+      mesh_cv_.wait(lk, [&] { return mesh_stop_ || !mesh_jobs_.empty(); });
+      if (mesh_stop_) return;
+      j = std::move(mesh_jobs_.front());
+      mesh_jobs_.pop_front();
+      ++mesh_busy_;
+    }
+    MeshDone d{j.key, j.gen, {}};
+    mesh::build(j.key.pack, *j.tile, *j.style, d.mesh, j.key.id.z);
+    std::lock_guard<std::mutex> lk(mesh_mu_);
+    --mesh_busy_;
+    mesh_done_.push_back(std::move(d));
+  }
+}
+
+bool MapRenderer::meshing() const {
+  std::lock_guard<std::mutex> lk(mesh_mu_);
+  return mesh_busy_ > 0 || !mesh_jobs_.empty() || !mesh_done_.empty();
+}
+
+void MapRenderer::queue_mesh(const TileKey& k, const GpuTile& g, bool front) {
+  MeshJob j{k, g.tile, style_ptr_, gen_};
+  std::lock_guard<std::mutex> lk(mesh_mu_);
+  if (front) mesh_jobs_.push_front(std::move(j));
+  else mesh_jobs_.push_back(std::move(j));
+  mesh_cv_.notify_one();
+}
+
+void MapRenderer::take_meshes() {
+  std::vector<MeshDone> done;
+  {
+    std::lock_guard<std::mutex> lk(mesh_mu_);
+    done.swap(mesh_done_);
+  }
+  for (auto& d : done) {
+    auto it = tiles_.find(d.key);
+    if (it == tiles_.end() || !it->second.tile) continue;  // evicted meanwhile
+    // a mesh of an older style still beats an empty tile; the current one replaces it when ready
+    if (d.gen < it->second.gen) continue;
+    upload(d.key, it->second, d.mesh);
+    it->second.gen = d.gen;
+  }
+}
+
+void MapRenderer::upload(const TileKey&, GpuTile& g, const mesh::Mesh& m) {
   ctx_.destroy_later(g.buf);
   g.buf = {};
   g.fill = g.lines = g.symbols = 0;
-  if (!g.tile) return;
-  mesh::Mesh m;
-  mesh::build(k.pack, *g.tile, style_, m, k.id.z);
+  g.meshed = true;
   if (m.vertex_count() == 0) return;
   g.buf = ctx_.create_buffer(m.vertex_count() * sizeof(mesh::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
   auto* dst = static_cast<mesh::Vertex*>(g.buf.mapped);
@@ -333,9 +389,23 @@ void MapRenderer::upload(const TileKey& k, GpuTile& g) {
 }
 
 void MapRenderer::set_style(const layers::MapStyle& s) {
+  take_meshes();
   if (s == style_) return;
   style_ = s;
-  for (auto& [k, g] : tiles_) upload(k, g);
+  style_ptr_ = std::make_shared<const layers::MapStyle>(style_);
+  ++gen_;
+  {
+    std::lock_guard<std::mutex> lk(mesh_mu_);
+    mesh_jobs_.clear();  // queued with the old style
+  }
+  // tiles on screen first, then the rest; each keeps drawing its old mesh until the new one lands
+  std::set<TileKey> first(keys_.begin(), keys_.end());
+  for (const auto& k : keys_) {
+    auto it = tiles_.find(k);
+    if (it != tiles_.end() && it->second.tile && !is_raster_pack(k.pack)) queue_mesh(k, it->second);
+  }
+  for (auto& [k, g] : tiles_)
+    if (g.tile && !is_raster_pack(k.pack) && !first.count(k)) queue_mesh(k, g);
 }
 
 void MapRenderer::add(const LoadedTile& t) {
@@ -345,7 +415,7 @@ void MapRenderer::add(const LoadedTile& t) {
   if (is_raster_pack(t.key.pack)) {
     release(g);
     g.raster = t.raster;
-  } else upload(t.key, g);
+  } else if (g.tile) queue_mesh(t.key, g, true);
   if (tiles_.size() > kMaxTiles) {
     // evict the least recently drawn quarter
     std::vector<std::pair<uint64_t, TileKey>> age;
@@ -364,17 +434,31 @@ int MapRenderer::tile_zoom(double zoom, const PackZoom& p) {
   return std::clamp(int(std::floor(zoom + 0.25)), p.minzoom, p.maxzoom);
 }
 
-std::vector<TileKey> MapRenderer::needed(const geo::Camera& cam, const std::vector<PackZoom>& packs) const {
+std::vector<TileKey> MapRenderer::needed(const geo::Camera& cam, const std::vector<PackZoom>& packs,
+                                         bool prefetch) const {
   std::vector<TileKey> out;
+  std::set<TileKey> seen;
+  auto want = [&](const std::string& pack, const geo::TileId& id) {
+    TileKey k{pack, id};
+    if (!known(k) && seen.insert(k).second) out.push_back(std::move(k));
+  };
   for (const auto& p : packs) {
     if (cam.zoom < p.show_from) continue;
     const int tz = tile_zoom(cam.zoom, p);
     // the parent level first, so something shows quickly when jumping far
     if (tz > p.minzoom)
-      for (const auto& id : geo::cover(cam, tz - 1))
-        if (!has({p.pack, id})) out.push_back({p.pack, id});
-    for (const auto& id : geo::cover(cam, tz))
-      if (!has({p.pack, id})) out.push_back({p.pack, id});
+      for (const auto& id : geo::cover(cam, tz - 1)) want(p.pack, id);
+    for (const auto& id : geo::cover(cam, tz)) want(p.pack, id);
+  }
+  // then a margin around the view, so a short pan finds its tiles already loaded
+  if (prefetch && cam.pitch < 30) {
+    geo::Camera wide = cam;
+    wide.w = cam.w * 1.8;
+    wide.h = cam.h * 1.8;
+    for (const auto& p : packs) {
+      if (cam.zoom < p.show_from) continue;
+      for (const auto& id : geo::cover(wide, tile_zoom(cam.zoom, p))) want(p.pack, id);
+    }
   }
   return out;
 }

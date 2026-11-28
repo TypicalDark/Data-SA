@@ -315,8 +315,12 @@ void App::frame() {
                                                                 : cam_.pitch + (pitch_target_ > cam_.pitch ? step : -step);
   }
 
+  const double f0 = now_s();
+  if (prof_.t_start == 0) prof_.t_start = f0;
   for (auto& t : loader_->take()) map_->add(t);
+  const double f1 = now_s();
   auto need = map_->needed(cam_, packs_);
+  if (need.empty() && !fly_) need = map_->needed(cam_, packs_, true);
   if (need != last_need_) {
     loader_->want(need);
     last_need_ = need;
@@ -336,7 +340,15 @@ void App::frame() {
   const double now = now_s();
   const double dt = opt_.screenshot.empty() ? std::min(0.1, now - last_frame_t_) : -1.0;
   last_frame_t_ = now;
+  const double f2 = now_s();
   map_->prepare(cam_, packs_, blockers_, dt);
+  {
+    const double f3 = now_s(), ms = (f3 - f0) * 1000;
+    prof_.add_ms += (f1 - f0) * 1000;
+    prof_.prep_ms += (f3 - f2) * 1000;
+    prof_.worst_ms = std::max(prof_.worst_ms, ms);
+    prof_.slow += ms > 33;
+  }
 
   const auto bg = style::background();
   const float clear[4] = {bg.r / 255.0f, bg.g / 255.0f, bg.b / 255.0f, 1.0f};
@@ -351,9 +363,11 @@ void App::frame() {
   ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vk_->cmd());
 
   // scripted screenshot: wait until no tiles are missing or in flight and areas have loaded
-  const bool idle = need.empty() && loader_->in_flight() == 0 && area_req_.empty() && !fly_ &&
+  const bool idle = map_->needed(cam_, packs_).empty() && loader_->in_flight() == 0 && !map_->meshing() && area_req_.empty() && !fly_ &&
                     !map_->labels_animating() && !search_req_.valid() && pending_fn_.empty();
   settled_frames_ = idle ? settled_frames_ + 1 : 0;
+  if (idle && prof_.t_settled == 0) prof_.t_settled = now_s();
+  if (!idle) prof_.t_settled = 0;
   const bool shoot = !opt_.screenshot.empty() && (settled_frames_ > 8 || (opt_.max_frames && frames_ >= opt_.max_frames));
   if (shoot || want_png_) {
     std::vector<uint8_t> px;
@@ -385,6 +399,11 @@ void App::frame() {
     } else {
       std::fprintf(stderr, "wrote %s (%ux%u, %zu tiles, %zu vertices)\n", out.c_str(), e.width, e.height, map_->tile_count(),
                    map_->vertex_count());
+      if (shoot)
+        std::fprintf(stderr, "load: settled after %.0f ms, %d frames, worst frame %.0f ms, %d frames over 33 ms, "
+                     "tile adds %.0f ms, labels %.0f ms\n",
+                     (prof_.t_settled - prof_.t_start) * 1000, frames_, prof_.worst_ms, prof_.slow, prof_.add_ms,
+                     prof_.prep_ms);
       if (!shoot) toast("Saved " + out, 4);
     }
     if (shoot) glfwSetWindowShouldClose(win_, GLFW_TRUE);

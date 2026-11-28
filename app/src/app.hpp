@@ -227,6 +227,10 @@ class App {
   std::vector<text::Rect> blockers_;  // interface windows this frame, logical pixels
   int frames_ = 0;
   int settled_frames_ = 0;
+  struct Profile {  // printed with scripted screenshots
+    double t_start = 0, t_settled = 0, worst_ms = 0, add_ms = 0, prep_ms = 0;
+    int slow = 0;
+  } prof_;
   std::vector<TileKey> last_need_;
   std::string fly_on_load_;
   bool want_png_ = false;

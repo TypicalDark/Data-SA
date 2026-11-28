@@ -1,7 +1,11 @@
 // Draws vector tiles with one Vulkan pipeline (fills, lines and symbols share a vertex format).
 #pragma once
 
+#include <condition_variable>
+#include <deque>
 #include <map>
+#include <mutex>
+#include <thread>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -32,10 +36,18 @@ class MapRenderer {
   void set_style(const layers::MapStyle& s);
   const layers::MapStyle& map_style() const { return style_; }
   void add(const LoadedTile& t);
-  bool has(const TileKey& k) const { return tiles_.count(k) != 0; }
+  // The tile can be drawn (its mesh is built, or the pack has nothing there).
+  bool has(const TileKey& k) const {
+    auto it = tiles_.find(k);
+    return it != tiles_.end() && (it->second.meshed || it->second.raster || it->second.ready || !it->second.tile);
+  }
+  // The tile has arrived (it may still be meshing): the loader need not fetch it again.
+  bool known(const TileKey& k) const { return tiles_.count(k) != 0; }
+  // Meshes are being built on the worker threads (new tiles or a style change).
+  bool meshing() const;
 
-  // Tiles the view needs (for the loader), best first.
-  std::vector<TileKey> needed(const geo::Camera& cam, const std::vector<PackZoom>& packs) const;
+  // Tiles the view needs (for the loader), best first; with `prefetch`, then a margin around the view.
+  std::vector<TileKey> needed(const geo::Camera& cam, const std::vector<PackZoom>& packs, bool prefetch = false) const;
 
   // Loads the label fonts from the assets folder; returns false when one is missing.
   bool load_fonts(const std::string& assets_dir);
@@ -79,6 +91,8 @@ class MapRenderer {
     vk::Buffer buf;
     GpuImage img;
     bool ready = false;  // image uploaded
+    bool meshed = false;  // buf holds a mesh (maybe of an older style while the new one builds)
+    uint64_t gen = 0;     // style generation of buf
     uint32_t fill = 0, lines = 0, symbols = 0;
     uint64_t used = 0;
   };
@@ -89,7 +103,10 @@ class MapRenderer {
     float u0 = 0, v0 = 0, uk = 1;
     float alpha = 1;
   };
-  void upload(const TileKey& k, GpuTile& g);
+  void upload(const TileKey& k, GpuTile& g, const mesh::Mesh& m);
+  void queue_mesh(const TileKey& k, const GpuTile& g, bool front = false);
+  void take_meshes();
+  void mesh_worker();
   void upload_image(VkCommandBuffer cmd, GpuTile& g);
   void release(GpuTile& g);
   void init_raster_pipeline();
@@ -117,6 +134,28 @@ class MapRenderer {
   std::vector<text::Vertex> text_verts_;
   size_t vertices_ = 0;
   uint64_t frame_ = 0;
+
+  // mesh building on worker threads: jobs carry the style they were queued with
+  struct MeshJob {
+    TileKey key;
+    std::shared_ptr<const mvt::Tile> tile;
+    std::shared_ptr<const layers::MapStyle> style;
+    uint64_t gen = 0;
+  };
+  struct MeshDone {
+    TileKey key;
+    uint64_t gen = 0;
+    mesh::Mesh mesh;
+  };
+  std::shared_ptr<const layers::MapStyle> style_ptr_;
+  uint64_t gen_ = 1;
+  mutable std::mutex mesh_mu_;
+  std::condition_variable mesh_cv_;
+  std::deque<MeshJob> mesh_jobs_;
+  std::vector<MeshDone> mesh_done_;
+  int mesh_busy_ = 0;
+  bool mesh_stop_ = false;
+  std::vector<std::thread> mesh_threads_;
 };
 
 }  // namespace gsa
