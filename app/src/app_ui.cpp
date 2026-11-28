@@ -61,6 +61,7 @@ void App::ui() {
     cam_.to_screen(geo::mx(c.lon), geo::my(c.lat), sx, sy);
     dl->AddCircleFilled(ImVec2(float(sx), float(sy)), 3.5f, u32(kAccent));
   }
+  live_draw();
   ui_measure();
   ui_rail();
   ui_side();
@@ -455,7 +456,7 @@ void App::ui_main(float x, float y, float w, float h) {
       }
       case Panel::Filter: ui_panel_filter(); break;
       case Panel::Layers: ui_panel_later("Layers", "Layer settings.", "C"); break;
-      case Panel::Live: ui_panel_later("Live", "Live planes and ships, and load shedding, through the back-end.", "F"); break;
+      case Panel::Live: ui_panel_live(); break;
       case Panel::Reach: ui_panel_later("Reach", "How far you get by car, transit, walking or cycling.", "F"); break;
       case Panel::Analyse: ui_panel_later("Analyse", "Totals for any area you draw: people, plots, grid, water.", "F"); break;
       case Panel::None: break;

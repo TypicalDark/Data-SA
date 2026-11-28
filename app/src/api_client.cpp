@@ -34,15 +34,35 @@ std::string url_encode(const std::string& s) {
   return o;
 }
 
-Response Client::get(const std::string& path) {
+Response Client::get(const std::string& path) { return get(path, std::string()); }
+
+Response Client::send(const std::string& method, const std::string& path, const std::string& body) {
   Response out;
-  auto r = impl_->http.Get(path);
+  const char* type = "application/json";
+  httplib::Result r = method == "PUT"    ? impl_->http.Put(path, body, type)
+                      : method == "POST" ? impl_->http.Post(path, body, type)
+                                         : impl_->http.Delete(path, body, type);
   if (!r) {
     out.error = httplib::to_string(r.error());
     return out;
   }
   out.status = r->status;
   out.body = r->body;
+  return out;
+}
+
+Response Client::get(const std::string& path, const std::string& etag) {
+  Response out;
+  httplib::Headers h;
+  if (!etag.empty()) h.emplace("If-None-Match", etag);
+  auto r = impl_->http.Get(path, h);
+  if (!r) {
+    out.error = httplib::to_string(r.error());
+    return out;
+  }
+  out.status = r->status;
+  out.body = r->body;
+  out.etag = r->get_header_value("ETag");
   if (r->get_header_value("Content-Encoding") == "gzip" && !out.body.empty()) {
     try {
       auto raw = gsa::gunzip(reinterpret_cast<const uint8_t*>(out.body.data()), out.body.size());

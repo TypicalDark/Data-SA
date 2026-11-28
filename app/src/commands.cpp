@@ -48,7 +48,7 @@ const std::vector<Spec>& all() {
       {"PATH", "to", "Shortest path to another facility", false},
       {"REACH", "", "Travel-time reach", false},
       {"ANA", "", "Analyse an area", false},
-      {"LIVE", "", "Live planes and ships", false},
+      {"LIVE", "planes|ships", "Live planes and ships, with trails and a watch list", true},
       {"3D", "", "Terrain and tilt", false},
   };
   return s;

@@ -376,6 +376,10 @@ void App::ui_facility(Card& c) {
     return;
   }
   const json& p = c.props;
+  if (p.value("layer", "") == "live") {
+    ui_live_card(c);
+    return;
+  }
   if (p.contains("layer")) {
     // a feature of a website layer: tag from its group, kind from the layer
     std::string lid = p["layer"].get<std::string>();

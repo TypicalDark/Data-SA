@@ -144,7 +144,7 @@ BackendProcess::BackendProcess(const std::filesystem::path& exe, const std::file
   for (auto& s : env_s) envp.push_back(s.data());
   envp.push_back(nullptr);
   std::string exe_s = exe.string(), data_s = data.string();
-  std::vector<std::string> args = {exe_s, "--data", data_s, "--port", "0", "--exit-with-stdin"};
+  std::vector<std::string> args = {exe_s, "--data", data_s, "--port", "0", "--exit-with-stdin", "--live", "--no-plane-poll"};
   std::vector<char*> argv;
   for (auto& a : args) argv.push_back(a.data());
   argv.push_back(nullptr);

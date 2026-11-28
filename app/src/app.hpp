@@ -3,6 +3,7 @@
 // breadcrumb, map buttons and status bar).
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <deque>
 #include <functional>
@@ -190,6 +191,47 @@ class App {
     std::string label, command, why;
   };
   std::vector<Task> tasks_for(const std::string& q) const;
+  // ---- live planes and ships (app_live.cpp), from the back-end's /v1/live
+  struct LiveItem {
+    std::string kind, id, name;  // kind: plane or ship
+    double lon = 0, lat = 0, alt = -1, spd = -1, hdg = -1, t = 0;  // m, m/s, degrees, unix seconds
+    bool watched = false;
+    nlohmann::json extra = nlohmann::json::object();
+  };
+  struct LiveFeed {
+    bool on = false;
+    std::vector<LiveItem> items;
+    nlohmann::json sources;
+    std::string etag, query, note;
+    double next = 0, fetched = 0;
+    std::future<api::Response> req;
+  };
+  struct LiveTrack {
+    std::vector<std::array<double, 6>> fixes;  // t, lon, lat, alt, spd, hdg
+    std::string name;
+    double next = 0;
+    std::future<api::Response> req;
+  };
+  LiveFeed planes_, ships_;
+  std::map<std::string, LiveTrack> tracks_;  // "plane/abc123"
+  std::vector<LiveItem> watched_;
+  double watch_next_ = 0, status_next_ = 0;
+  std::future<api::Response> watch_req_, status_req_;
+  std::vector<std::future<api::Response>> live_sends_;
+  nlohmann::json live_status_;
+  std::future<api::Response> live_get(const std::string& path, const std::string& etag = "");
+  void live_send(const std::string& method, const std::string& path, const std::string& body = "");
+  static std::string live_key(const std::string& kind, const std::string& id);
+  const LiveItem* live_find(const std::string& kind, const std::string& id) const;
+  bool live_is_watched(const std::string& kind, const std::string& id) const;
+  void live_set(bool planes, bool ships);
+  void live_watch(const std::string& kind, const std::string& id, bool on, const std::string& label);
+  void live_poll();
+  void live_draw();
+  const LiveItem* live_pick(double sx, double sy) const;
+  void open_live(const LiveItem& it);
+  void ui_live_card(Card& c);
+  void ui_panel_live();
   // card strip: the functions that fit, the rest under More
   std::vector<std::string> card_lines(const Card& c);  // facts of a card as "label: value" (REPORT)
   void save_settings();

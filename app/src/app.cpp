@@ -125,6 +125,11 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
       }
     }
     rank_key_ = sd.value("rank", rank_key_);
+    if (sd.contains("live") && sd["live"].is_object()) {
+      planes_.on = sd["live"].value("planes", false);
+      ships_.on = sd["live"].value("ships", false);
+      if (planes_.on) live_send("POST", "/v1/live/poller", R"({"on":true})");
+    }
     try {
       cmp_ = sd.value("cmp", std::vector<std::string>{});
       if (cmp_.size() > 4) cmp_.resize(4);
@@ -161,7 +166,14 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
   if (opt_.zoom) cam_.zoom = *opt_.zoom;
   if (opt_.pitch) cam_.pitch = pitch_target_ = std::clamp(*opt_.pitch, 0.0, geo::kMaxPitch);
   if (!opt_.lon) cam_.cx -= side_width() / 2 / cam_.scale();  // centre the country in the free map area
-  if (!opt_.select.empty()) open_area(opt_.select, !opt_.lon);
+  if (opt_.select.rfind("live:", 0) == 0 && opt_.select.find('/') != std::string::npos) {
+    // "live:ship/601234567": a live card (scripted runs)
+    const std::string k = opt_.select.substr(5, opt_.select.find('/') - 5), id = opt_.select.substr(opt_.select.find('/') + 1);
+    LiveItem it;
+    it.kind = k;
+    it.id = id;
+    open_live(it);
+  } else if (!opt_.select.empty()) open_area(opt_.select, !opt_.lon);
   if (opt_.spot) open_spot(opt_.spot->first, opt_.spot->second);
   if (const auto colon = opt_.measure.find(':'); colon != std::string::npos) {
     const std::string mode = opt_.measure.substr(0, colon);
@@ -186,6 +198,7 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
       find_tab_ = 2;
       open_panel(Panel::Find);
     } else if (p == "hist") open_panel(Panel::History);
+    else if (p == "live") open_panel(Panel::Live);
     else if (p == "find") open_panel(Panel::Find);
     else if (p == "list") open_panel(Panel::List);
     else if (p == "filter") open_panel(Panel::Filter);
@@ -364,6 +377,7 @@ void App::frame() {
     last_need_ = need;
   }
   poll_async();
+  live_poll();
   map_->set_style(map_style_now());
 
   ImGui_ImplVulkan_NewFrame();
@@ -402,7 +416,8 @@ void App::frame() {
   if (!(want_png_ && on_png_)) ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vk_->cmd());  // reports: map only
 
   // scripted screenshot: wait until no tiles are missing or in flight and areas have loaded
-  const bool idle = script_.empty() && !report_pending_ && !want_png_ && map_->needed(cam_, packs_).empty() && loader_->in_flight() == 0 && !map_->meshing() && area_req_.empty() && !fly_ &&
+  const bool idle = script_.empty() && !planes_.req.valid() && !ships_.req.valid() && !watch_req_.valid() &&
+                    std::none_of(tracks_.begin(), tracks_.end(), [](const auto& t) { return t.second.req.valid() || t.second.next == 0; }) && !report_pending_ && !want_png_ && map_->needed(cam_, packs_).empty() && loader_->in_flight() == 0 && !map_->meshing() && area_req_.empty() && !fly_ &&
                     !map_->labels_animating() && !search_req_.valid() && pending_fn_.empty();
   settled_frames_ = idle ? settled_frames_ + 1 : 0;
   if (idle && prof_.t_settled == 0) prof_.t_settled = now_s();
@@ -1064,6 +1079,15 @@ bool App::run_command(const std::string& line) {
       panel_ = Panel::Views;
       side_open_ = true;
     } else load_view(a);
+  } else if (c == "LIVE") {
+    std::string q = a;
+    std::transform(q.begin(), q.end(), q.begin(), ::tolower);
+    if (q.rfind("plane", 0) == 0) live_set(!planes_.on, ships_.on);
+    else if (q.rfind("ship", 0) == 0) live_set(planes_.on, !ships_.on);
+    else if (q == "on") live_set(true, true);
+    else if (q == "off") live_set(false, false);
+    panel_ = Panel::Live;
+    side_open_ = true;
   } else if (c == "X") {
     close_top();
   } else if (c == "HELP") {
@@ -1117,7 +1141,10 @@ void App::handle_input() {
     // hover: the facility or municipality under the cursor
     double wx, wy;
     cam_.to_world(m.x, m.y, wx, wy);
-    if (const auto* r = map_->pick_icon(m.x, m.y)) {
+    if (const auto* lv = live_pick(m.x, m.y)) {
+      hover_name_ = (lv->name.empty() ? lv->id : lv->name) + (lv->kind == "plane" ? " (plane)" : " (ship)");
+      ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    } else if (const auto* r = map_->pick_icon(m.x, m.y)) {
       hover_name_ = r->feature().str("name");
       ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
     } else if (const auto h = map_->pick_web(m.x, m.y, cam_)) {
@@ -1153,6 +1180,9 @@ void App::handle_input() {
         cam_.to_world(m.x, m.y, wx, wy);
         if (measuring_) {
           measure_click(m.x, m.y, wx, wy);
+        } else if (const auto* lv = live_pick(m.x, m.y)) {
+          const LiveItem copy = *lv;
+          open_live(copy);
         } else if (const auto* r = map_->pick_icon(m.x, m.y)) {
           open_facility(*r);
         } else if (const auto h = map_->pick_web(m.x, m.y, cam_)) {
@@ -1205,6 +1235,7 @@ void App::handle_input() {
       measure_done_ = true;
     if (ImGui::IsKeyPressed(ImGuiKey_F3, false)) open_panel(Panel::Filter);
     if (ImGui::IsKeyPressed(ImGuiKey_F4, false)) open_panel(Panel::List);
+    if (ImGui::IsKeyPressed(ImGuiKey_F5, false)) open_panel(Panel::Live);
     if (ImGui::IsKeyPressed(ImGuiKey_F6, false)) open_panel(Panel::Views);
     if (ImGui::IsKeyPressed(ImGuiKey_F7, false)) open_panel(Panel::Measure);
     if (ImGui::IsKeyPressed(ImGuiKey_F1, false)) open_panel(Panel::Keys);

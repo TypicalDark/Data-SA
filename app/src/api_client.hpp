@@ -20,6 +20,7 @@ struct Response {
   int status = 0;  // 0 = no connection
   std::string body;
   std::string error;
+  std::string etag;  // the response's ETag, for If-None-Match next time
   bool ok() const { return status == 200; }
 };
 
@@ -37,6 +38,10 @@ class Client {
   Client& operator=(const Client&) = delete;
 
   Response get(const std::string& path);
+  // GET with If-None-Match: status 304 when nothing changed since `etag`.
+  Response get(const std::string& path, const std::string& etag);
+  // PUT, POST or DELETE with an optional JSON body.
+  Response send(const std::string& method, const std::string& path, const std::string& json_body = "");
   std::optional<nlohmann::json> get_json(const std::string& path, std::string* err = nullptr);
 
   // Raw tile bytes, already decompressed. Empty optional with status 204 means "no tile".
