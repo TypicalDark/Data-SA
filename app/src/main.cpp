@@ -52,7 +52,7 @@ int usage(const char* why) {
   if (why) std::fprintf(stderr, "gsa: %s\n", why);
   std::fprintf(stderr,
                "usage: gsa [--data DIR | --api HOST:PORT] [--backend PATH] [--size WxH] [--validation]\n"
-               "           [--screenshot out.png] [--topic NAME] [--select AREA_ID] [--at LON,LAT,ZOOM] [--frames N]\n"
+               "           [--screenshot out.png] [--topic NAME] [--select AREA_ID] [--at LON,LAT,ZOOM] [--frames N] [--bench]\n"
                "           [--panel find|rank|list|areas|views|watch|keys|catalogue] [--command LINE] [--spot LON,LAT] [--pitch DEG]\n"
                "           [--measure path|area|circle:LON,LAT,LON,LAT...]\n"
                "           [--settings FILE]\n");
@@ -86,6 +86,7 @@ int main(int argc, char** argv) {
       if (std::sscanf(val().c_str(), "%lf,%lf", &lon, &lat) != 2) return usage("--spot wants LON,LAT");
       opt.spot = std::make_pair(lon, lat);
     }
+    else if (a == "--bench") opt.bench = true;
     else if (a == "--frames") opt.max_frames = std::atoi(val().c_str());
     else if (a == "--assets") opt.assets_dir = val();
     else if (a == "--size") {

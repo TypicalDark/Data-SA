@@ -49,6 +49,7 @@ struct AppOptions {
   std::optional<double> pitch;  // tilt in degrees (3D), 0 to 60
   std::optional<std::pair<double, double>> spot;  // right-click spot to open (lon, lat)
   std::string measure;  // "area:lon,lat,lon,lat,...": a finished measurement (for screenshots)
+  bool bench = false;          // fly a fixed tour and print frame timings and tile coverage
   int max_frames = 0;          // quit after this many frames (0 = run until closed)
 };
 
@@ -337,10 +338,21 @@ class App {
     double t_start = 0, t_settled = 0, worst_ms = 0, add_ms = 0, prep_ms = 0;
     int slow = 0;
   } prof_;
+  struct BenchFrame {
+    double cpu_ms, frame_ms, take_ms, need_ms, ui_ms, prep_ms, exact, holes;
+  };
+  std::vector<BenchFrame> bench_;
+  double bench_t0_ = 0;
+  int bench_leg_ = 0;
+  bool bench_step();  // places the camera on the tour; false once it is over
+  void bench_report();
   std::vector<TileKey> last_need_;
   std::deque<std::string> script_;  // --command steps still to run
   std::string fly_on_load_;
   bool want_png_ = false;
+  std::optional<double> zoom_goal_;  // wheel zoom glides here
+  double zoom_ax_ = 0, zoom_ay_ = 0;  // ... around this screen point
+  double fling_vx_ = 0, fling_vy_ = 0, fling_t_ = 0;  // glide after a flick, px/s
 };
 
 }  // namespace gsa

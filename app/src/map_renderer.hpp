@@ -6,12 +6,14 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <set>
 #include <thread>
 #include <memory>
 #include <optional>
 #include <vector>
 
 #include "geo.hpp"
+#include "vertex_pool.hpp"
 #include "map_labels.hpp"
 #include "mesh.hpp"
 #include "text/atlas.hpp"
@@ -44,6 +46,9 @@ class MapRenderer {
   }
   // The tile has arrived (it may still be meshing): the loader need not fetch it again.
   bool known(const TileKey& k) const { return tiles_.count(k) != 0; }
+  // Share of the view's tiles drawn at their own zoom (1 = sharp everywhere), and of those with nothing
+  // drawn at all, not even a parent (holes). For the --bench report.
+  void coverage(const geo::Camera& cam, const std::vector<PackZoom>& packs, double& exact, double& holes) const;
   // Meshes are being built on the worker threads (new tiles or a style change).
   bool meshing() const;
 
@@ -93,7 +98,7 @@ class MapRenderer {
   struct GpuTile {
     std::shared_ptr<const mvt::Tile> tile;
     std::shared_ptr<const Raster> raster;  // image packs: kept until uploaded
-    vk::Buffer buf;
+    vk::Slice buf;
     GpuImage img;
     bool ready = false;  // image uploaded
     bool meshed = false;  // buf holds a mesh (maybe of an older style while the new one builds)
@@ -108,7 +113,6 @@ class MapRenderer {
     float u0 = 0, v0 = 0, uk = 1;
     float alpha = 1;
   };
-  void upload(const TileKey& k, GpuTile& g, const mesh::Mesh& m);
   void queue_mesh(const TileKey& k, const GpuTile& g, bool front = false);
   void take_meshes();
   void mesh_worker();
@@ -120,6 +124,9 @@ class MapRenderer {
   static int tile_zoom(double zoom, const PackZoom& p);
 
   vk::Context& ctx_;
+  std::unique_ptr<vk::VertexPool> pool_;
+  void free_later(vk::Slice& s);
+  void evict();  // back to the pool once the frames in flight are done with it
   VkPipelineLayout layout_ = VK_NULL_HANDLE;
   VkPipeline pipeline_ = VK_NULL_HANDLE;
   VkPipelineLayout raster_layout_ = VK_NULL_HANDLE;
@@ -147,11 +154,13 @@ class MapRenderer {
     std::shared_ptr<const layers::MapStyle> style;
     uint64_t gen = 0;
   };
-  struct MeshDone {
+  struct MeshDone {  // a tile's mesh, already copied into GPU memory by the worker
     TileKey key;
     uint64_t gen = 0;
-    mesh::Mesh mesh;
+    vk::Slice slice;
+    uint32_t fill = 0, lines = 0, symbols = 0;
   };
+  void place(GpuTile& g, MeshDone& d);  // a finished mesh replaces the tile's old one
   std::shared_ptr<const layers::MapStyle> style_ptr_;
   uint64_t gen_ = 1;
   mutable std::mutex mesh_mu_;

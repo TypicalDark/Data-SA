@@ -1,6 +1,7 @@
 #include "app.hpp"
 
 #include <algorithm>
+#include <tuple>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
@@ -341,6 +342,73 @@ int App::run() {
   return 0;
 }
 
+// --bench: a fixed tour at the pace of a person flying about (country, into Johannesburg, plots,
+// a pan, out, across to Cape Town, a pan, a pause), timed against the wall clock so slow frames
+// show as missed tiles and long frames rather than a slower tour.
+bool App::bench_step() {
+  struct Key {
+    double lon, lat, zoom, secs;
+  };
+  static const Key tour[] = {{25.2, -28.8, 5.4, 0},     {28.05, -26.15, 10, 2.0}, {28.05, -26.15, 13, 1.5},
+                             {28.25, -26.15, 13, 1.5},  {28.25, -26.10, 15, 1.5}, {28.25, -26.10, 9, 1.5},
+                             {18.45, -33.93, 11, 2.5},  {18.60, -33.93, 11, 1.5}, {18.60, -33.93, 11, 1.5}};
+  const double now = now_s();
+  if (bench_t0_ == 0) {
+    if (frames_ < 30 && (loader_->in_flight() || map_->meshing() || frames_ < 3)) return true;  // the country first
+    bench_t0_ = now;
+    bench_.clear();
+  }
+  // each leg is a flight like GO or a search result makes, so the destination prefetch takes part
+  double t = now - bench_t0_, at = 0;
+  for (size_t i = 1; i < std::size(tour); ++i) {
+    at += tour[i].secs;
+    if (t > at) continue;
+    if (bench_leg_ != int(i)) {
+      bench_leg_ = int(i);
+      fly_ = Fly{now, tour[i].secs, cam_, geo::mx(tour[i].lon), geo::my(tour[i].lat), tour[i].zoom};
+    }
+    return true;
+  }
+  return false;
+}
+
+void App::bench_report() {
+  if (bench_.empty()) return;
+  auto pct = [&](auto field, double q) {
+    std::vector<double> v;
+    for (const auto& b : bench_) v.push_back(b.*field);
+    std::sort(v.begin(), v.end());
+    return v[std::min(v.size() - 1, size_t(q * double(v.size())))];
+  };
+  auto mean = [&](auto field) {
+    double s = 0;
+    for (const auto& b : bench_) s += b.*field;
+    return s / double(bench_.size());
+  };
+  int slow = 0, blurry = 0, holes = 0;
+  for (const auto& b : bench_) slow += b.frame_ms > 33, blurry += b.exact < 0.999, holes += b.holes > 0;
+  const double secs = 0.001 * [&] { double s = 0; for (const auto& b : bench_) s += b.frame_ms; return s; }();
+  const double n = double(bench_.size());
+  std::fprintf(stderr,
+               "bench: %zu frames in %.1f s (%.0f fps)\n"
+               "  frame ms  p50 %.1f  p95 %.1f  p99 %.1f  max %.1f  over 33 ms: %d\n"
+               "  cpu ms    p50 %.1f  p95 %.1f  max %.1f  (mean take %.2f, need %.2f, ui %.2f, labels+draw %.2f)\n"
+               "  tiles     sharp %.1f%% of view on average; %.0f%% of frames not fully sharp, %.1f%% with holes\n",
+               bench_.size(), secs, n / secs, pct(&BenchFrame::frame_ms, 0.5), pct(&BenchFrame::frame_ms, 0.95),
+               pct(&BenchFrame::frame_ms, 0.99), pct(&BenchFrame::frame_ms, 1.0), slow, pct(&BenchFrame::cpu_ms, 0.5),
+               pct(&BenchFrame::cpu_ms, 0.95), pct(&BenchFrame::cpu_ms, 1.0), mean(&BenchFrame::take_ms),
+               mean(&BenchFrame::need_ms), mean(&BenchFrame::ui_ms), mean(&BenchFrame::prep_ms), 100 * mean(&BenchFrame::exact),
+               100 * blurry / n, 100 * holes / n);
+  std::vector<size_t> idx(bench_.size());
+  for (size_t i = 0; i < idx.size(); ++i) idx[i] = i;
+  std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) { return bench_[a].cpu_ms > bench_[b].cpu_ms; });
+  for (size_t i = 0; i < idx.size() && i < 5; ++i) {
+    const auto& b = bench_[idx[i]];
+    std::fprintf(stderr, "  slowest cpu #%zu: frame %zu, %.1f ms (take %.1f, need %.1f, ui %.1f, labels+draw %.1f)\n", i + 1,
+                 idx[i], b.cpu_ms, b.take_ms, b.need_ms, b.ui_ms, b.prep_ms);
+  }
+}
+
 void App::frame() {
   int ww, wh;
   glfwGetWindowSize(win_, &ww, &wh);
@@ -355,12 +423,34 @@ void App::frame() {
     cam_.zoom = fly_->from.zoom + (fly_->zoom - fly_->from.zoom) * e;
     if (k >= 1) fly_.reset();
   }
+  {
+    // smooth wheel zoom and the glide after a flick, both frame-rate independent
+    const double dt = std::clamp(ImGui::GetIO().DeltaTime, 0.001f, 0.1f);
+    if (zoom_goal_) {
+      const double left = *zoom_goal_ - cam_.zoom;
+      const double dz = std::abs(left) < 0.003 ? left : left * (1 - std::exp(-dt / 0.07));
+      cam_.zoom_at(dz, zoom_ax_, zoom_ay_);
+      if (std::abs(left) < 0.003) zoom_goal_.reset();
+    }
+    if (!dragging_ && (fling_vx_ != 0 || fling_vy_ != 0)) {
+      cam_.pan_px(fling_vx_ * dt, fling_vy_ * dt);
+      const double k = std::exp(-dt / 0.25);
+      fling_vx_ *= k;
+      fling_vy_ *= k;
+      if (std::hypot(fling_vx_, fling_vy_) < 20) fling_vx_ = fling_vy_ = 0;
+    }
+  }
   if (cam_.pitch != pitch_target_) {
     const double step = std::clamp(ImGui::GetIO().DeltaTime * 160.0, 0.5, 20.0);
     cam_.pitch = std::abs(pitch_target_ - cam_.pitch) <= step ? pitch_target_
                                                                 : cam_.pitch + (pitch_target_ > cam_.pitch ? step : -step);
   }
 
+  if (opt_.bench && !bench_step()) {
+    bench_report();
+    glfwSetWindowShouldClose(win_, GLFW_TRUE);
+    return;
+  }
   const double f0 = now_s();
   if (prof_.t_start == 0) prof_.t_start = f0;
   if (!script_.empty() && frames_ >= 2 && !fly_ && pending_fn_.empty()) {
@@ -370,8 +460,17 @@ void App::frame() {
   if (report_pending_ && report_ready()) report_now();
   for (auto& t : loader_->take()) map_->add(t);
   const double f1 = now_s();
+  const double fn0 = now_s();
   auto need = map_->needed(cam_, packs_);
-  if (need.empty() && !fly_) need = map_->needed(cam_, packs_, true);
+  if (fly_) {
+    // flying: fetch where the flight lands too, after what is on screen now, so it arrives sharp
+    geo::Camera to = cam_;
+    to.cx = fly_->cx;
+    to.cy = fly_->cy;
+    to.zoom = fly_->zoom;
+    for (auto& k : map_->needed(to, packs_))
+      if (std::find(need.begin(), need.end(), k) == need.end()) need.push_back(std::move(k));
+  } else if (need.empty()) need = map_->needed(cam_, packs_, true);
   if (need != last_need_) {
     loader_->want(need);
     last_need_ = need;
@@ -380,6 +479,7 @@ void App::frame() {
   live_poll();
   map_->set_style(map_style_now());
 
+  const double fu0 = now_s();
   ImGui_ImplVulkan_NewFrame();
   ImGui_ImplGlfw_NewFrame();
   ImGui::NewFrame();
@@ -414,9 +514,23 @@ void App::frame() {
   }
   map_->draw(vk_->cmd(), cam_, dpr);
   if (!(want_png_ && on_png_)) ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vk_->cmd());  // reports: map only
+  if (opt_.bench) {
+    const double fe = now_s();
+    BenchFrame b{};
+    b.cpu_ms = (fe - f0) * 1000;
+    b.take_ms = (f1 - f0) * 1000;
+    b.need_ms = (fu0 - fn0) * 1000;
+    b.ui_ms = (f2 - fu0) * 1000;
+    b.prep_ms = (fe - f2) * 1000;
+    map_->coverage(cam_, packs_, b.exact, b.holes);
+    vk_->end_frame(nullptr);
+    b.frame_ms = (now_s() - f0) * 1000;
+    bench_.push_back(b);
+    return;
+  }
 
   // scripted screenshot: wait until no tiles are missing or in flight and areas have loaded
-  const bool idle = script_.empty() && !planes_.req.valid() && !ships_.req.valid() && !watch_req_.valid() &&
+  const bool idle = script_.empty() && !zoom_goal_ && fling_vx_ == 0 && fling_vy_ == 0 && !planes_.req.valid() && !ships_.req.valid() && !watch_req_.valid() &&
                     std::none_of(tracks_.begin(), tracks_.end(), [](const auto& t) { return t.second.req.valid() || t.second.next == 0; }) && !report_pending_ && !want_png_ && map_->needed(cam_, packs_).empty() && loader_->in_flight() == 0 && !map_->meshing() && area_req_.empty() && !fly_ &&
                     !map_->labels_animating() && !search_req_.valid() && pending_fn_.empty();
   settled_frames_ = idle ? settled_frames_ + 1 : 0;
@@ -745,6 +859,8 @@ void App::fly_to(double lon, double lat, double zoom) {
   to.zoom = zoom;
   const double off = side_width() / 2 / to.scale();
   fly_on_load_.clear();  // a newer fly wins over an area card's fly once its outline loads
+  zoom_goal_.reset();
+  fling_vx_ = fling_vy_ = 0;
   fly_ = Fly{now_s(), 0.7, cam_, geo::mx(lon) - off, geo::my(lat), zoom};
 }
 
@@ -1119,9 +1235,13 @@ void App::handle_input() {
   const ImVec2 m = io.MousePos;
   const bool over_map = !io.WantCaptureMouse && m.x > side_width();
   if (over_map) {
-    if (io.MouseWheel != 0) {
+    if (io.MouseWheel != 0) {  // the wheel sets a goal; frame() glides there, anchored at the pointer
       fly_.reset();
-      cam_.zoom_at(io.MouseWheel * 0.35, m.x, m.y);
+      fling_vx_ = fling_vy_ = 0;
+      if (!zoom_goal_) zoom_goal_ = cam_.zoom;
+      zoom_goal_ = std::clamp(*zoom_goal_ + io.MouseWheel * 0.5, 3.0, 16.0);
+      zoom_ax_ = m.x;
+      zoom_ay_ = m.y;
     }
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
       dragging_ = true;
@@ -1131,7 +1251,9 @@ void App::handle_input() {
     }
     if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !measuring_) {
       fly_.reset();
-      cam_.zoom_at(1.0, m.x, m.y);
+      zoom_goal_ = std::clamp((zoom_goal_ ? *zoom_goal_ : cam_.zoom) + 1.0, 3.0, 16.0);
+      zoom_ax_ = m.x;
+      zoom_ay_ = m.y;
     }
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
       double wx, wy;
@@ -1168,6 +1290,11 @@ void App::handle_input() {
             cam_.pitch = pitch_target_ = std::clamp(cam_.pitch - dy * 0.3, 0.0, geo::kMaxPitch);
           } else {
             cam_.pan_px(dx, dy);
+            // pointer speed in px/s, smoothed, for the glide after letting go
+            const double dt = std::max(1e-3, double(io.DeltaTime));
+            fling_vx_ = 0.6 * fling_vx_ + 0.4 * dx / dt;
+            fling_vy_ = 0.6 * fling_vy_ + 0.4 * dy / dt;
+            fling_t_ = now_s();
           }
         }
       }
@@ -1175,6 +1302,8 @@ void App::handle_input() {
       drag_y_ = m.y;
     } else {
       dragging_ = false;
+      // a quick flick keeps the map gliding; holding still before letting go stops it
+      if (!drag_moved_ || now_s() - fling_t_ > 0.06 || std::hypot(fling_vx_, fling_vy_) < 250) fling_vx_ = fling_vy_ = 0;
       if (!drag_moved_ && !io.WantCaptureMouse) {
         double wx, wy;
         cam_.to_world(m.x, m.y, wx, wy);
@@ -1214,8 +1343,12 @@ void App::handle_input() {
     const auto& tps = layers::topics();
     for (size_t i = 0; i < tps.size() && i < 10; ++i)
       if (ImGui::IsKeyPressed(digits[i], false) && !io.KeyCtrl) set_topic(tps[i].id);
-    if (ImGui::IsKeyPressed(ImGuiKey_Equal) || ImGui::IsKeyPressed(ImGuiKey_KeypadAdd)) cam_.zoom_at(0.5, cam_.w / 2, cam_.h / 2);
-    if (ImGui::IsKeyPressed(ImGuiKey_Minus) || ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract)) cam_.zoom_at(-0.5, cam_.w / 2, cam_.h / 2);
+    for (const auto& [key, key2, dz] : {std::tuple{ImGuiKey_Equal, ImGuiKey_KeypadAdd, 0.5}, std::tuple{ImGuiKey_Minus, ImGuiKey_KeypadSubtract, -0.5}})
+      if (ImGui::IsKeyPressed(key) || ImGui::IsKeyPressed(key2)) {
+        zoom_goal_ = std::clamp((zoom_goal_ ? *zoom_goal_ : cam_.zoom) + dz, 3.0, 16.0);
+        zoom_ax_ = (side_width() + cam_.w) / 2;
+        zoom_ay_ = cam_.h / 2;
+      }
     if (ImGui::IsKeyPressed(ImGuiKey_Home, false)) fly_to(25.2, -28.8, 5.4);
     if (ImGui::IsKeyPressed(ImGuiKey_Slash, false) && !shift) focus_search_ = true;
     if (ImGui::IsKeyPressed(ImGuiKey_Slash, false) && shift) open_panel(Panel::Keys);  // "?"

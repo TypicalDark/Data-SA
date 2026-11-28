@@ -56,9 +56,16 @@ that should sync later (saved views, watchlists) will go through the API.
   pool (up to four threads) tessellates (earcut for polygons, extruded quads for lines); the main
   thread only copies finished meshes into GPU buffers. A style change bumps a generation, re-queues the
   visible tiles first, and the old meshes keep drawing until the new ones land, so nothing flashes.
-  While a tile loads, its nearest loaded ancestor stands in. When the view's tiles are all in, the
-  loader prefetches a 1.8x margin around it (flat views only). Least recently drawn tiles are evicted
-  past 600. Scripted screenshots print a `load:` line (time to settle, worst frame, frames over 33 ms).
+  The workers also copy each mesh into GPU memory: vertex memory comes from `VertexPool`, 32 MB blocks
+  carved into slices (one Vulkan allocation per block, not per tile), in memory that is both on the GPU
+  and CPU-writable where the driver offers it, else host memory. While a tile loads, its nearest loaded
+  ancestor stands in. When the view's tiles are all in, the loader prefetches a 1.8x margin around it
+  (flat views only); during a flight it also fetches where the flight lands. Tiles are evicted past 600
+  or 640 MB of vertices, least recently drawn first, never zoom 8 and below (they stand in anywhere),
+  and decoded tiles are freed on a helper thread. The wheel sets a zoom goal that the camera glides to
+  around the pointer, and a flicked drag keeps gliding. Scripted screenshots print a `load:` line;
+  `--bench` flies a fixed 13 s tour (country, Johannesburg plots, a pan, Cape Town) and prints frame
+  times, CPU time per stage and how much of the view was sharp.
 - **Text and icons.** A second pipeline draws map text and point icons from one distance-field
   atlas (R8, 1024 x 1024): glyphs are rendered on first use with stb_truetype at 24 px and drawn
   at any size with a sharp edge and a halo from the same texture; icons (square, circle, diamond,

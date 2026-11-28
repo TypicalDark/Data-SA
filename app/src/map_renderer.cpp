@@ -60,7 +60,7 @@ constexpr uint32_t kMaxImages = 512;      // descriptor sets for image tiles
 constexpr int kImageUploadsPerFrame = 12;  // spread big jumps over a few frames
 }  // namespace
 
-MapRenderer::MapRenderer(vk::Context& ctx) : ctx_(ctx), text_(ctx) {
+MapRenderer::MapRenderer(vk::Context& ctx) : ctx_(ctx), pool_(std::make_unique<vk::VertexPool>(ctx)), text_(ctx) {
   style_ptr_ = std::make_shared<const layers::MapStyle>(style_);
   const unsigned hw = std::max(2u, std::thread::hardware_concurrency());
   for (unsigned i = 0; i < std::min(4u, hw - 1); ++i) mesh_threads_.emplace_back([this] { mesh_worker(); });
@@ -224,7 +224,7 @@ MapRenderer::~MapRenderer() {
   const VkDevice dev = ctx_.device();
   vkDeviceWaitIdle(dev);
   for (auto& [k, g] : tiles_) {
-    ctx_.destroy_now(g.buf);
+    pool_->free(g.buf);
     release(g);
   }
   ctx_.flush_garbage();  // image tiles queued for release free their sets from the pool below
@@ -336,7 +336,23 @@ void MapRenderer::mesh_worker() {
       ++mesh_busy_;
     }
     MeshDone d{j.key, j.gen, {}};
-    mesh::build(j.key.pack, *j.tile, *j.style, d.mesh, j.key.id.z);
+    {
+      mesh::Mesh m;
+      mesh::build(j.key.pack, *j.tile, *j.style, m, j.key.id.z);
+      // copy into GPU memory here, off the main thread: a buildings tile can hold 30 MB of vertices
+      if (m.vertex_count()) {
+        d.slice = pool_->alloc(m.vertex_count() * sizeof(mesh::Vertex));
+        if (d.slice) {
+          auto* dst = static_cast<mesh::Vertex*>(d.slice.mapped);
+          std::memcpy(dst, m.fill.data(), m.fill.size() * sizeof(mesh::Vertex));
+          std::memcpy(dst + m.fill.size(), m.lines.data(), m.lines.size() * sizeof(mesh::Vertex));
+          std::memcpy(dst + m.fill.size() + m.lines.size(), m.symbols.data(), m.symbols.size() * sizeof(mesh::Vertex));
+          d.fill = uint32_t(m.fill.size());
+          d.lines = uint32_t(m.lines.size());
+          d.symbols = uint32_t(m.symbols.size());
+        }
+      }
+    }
     std::lock_guard<std::mutex> lk(mesh_mu_);
     --mesh_busy_;
     mesh_done_.push_back(std::move(d));
@@ -364,28 +380,30 @@ void MapRenderer::take_meshes() {
   }
   for (auto& d : done) {
     auto it = tiles_.find(d.key);
-    if (it == tiles_.end() || !it->second.tile) continue;  // evicted meanwhile
+    // evicted meanwhile, or a mesh of an older style than the one drawing: never drawn, so freed at once
+    if (it == tiles_.end() || !it->second.tile || d.gen < it->second.gen) {
+      pool_->free(d.slice);
+      continue;
+    }
     // a mesh of an older style still beats an empty tile; the current one replaces it when ready
-    if (d.gen < it->second.gen) continue;
-    upload(d.key, it->second, d.mesh);
-    it->second.gen = d.gen;
+    place(it->second, d);
   }
 }
 
-void MapRenderer::upload(const TileKey&, GpuTile& g, const mesh::Mesh& m) {
-  ctx_.destroy_later(g.buf);
-  g.buf = {};
-  g.fill = g.lines = g.symbols = 0;
+void MapRenderer::free_later(vk::Slice& s) {
+  if (s) ctx_.destroy_later([p = pool_.get(), s] { p->free(s); });
+  s = {};
+}
+
+void MapRenderer::place(GpuTile& g, MeshDone& d) {
+  free_later(g.buf);
+  g.buf = d.slice;
+  d.slice = {};
+  g.fill = d.fill;
+  g.lines = d.lines;
+  g.symbols = d.symbols;
   g.meshed = true;
-  if (m.vertex_count() == 0) return;
-  g.buf = ctx_.create_buffer(m.vertex_count() * sizeof(mesh::Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-  auto* dst = static_cast<mesh::Vertex*>(g.buf.mapped);
-  std::memcpy(dst, m.fill.data(), m.fill.size() * sizeof(mesh::Vertex));
-  std::memcpy(dst + m.fill.size(), m.lines.data(), m.lines.size() * sizeof(mesh::Vertex));
-  std::memcpy(dst + m.fill.size() + m.lines.size(), m.symbols.data(), m.symbols.size() * sizeof(mesh::Vertex));
-  g.fill = uint32_t(m.fill.size());
-  g.lines = uint32_t(m.lines.size());
-  g.symbols = uint32_t(m.symbols.size());
+  g.gen = d.gen;
 }
 
 void MapRenderer::set_style(const layers::MapStyle& s) {
@@ -416,18 +434,31 @@ void MapRenderer::add(const LoadedTile& t) {
     release(g);
     g.raster = t.raster;
   } else if (g.tile) queue_mesh(t.key, g, true);
-  if (tiles_.size() > kMaxTiles) {
-    // evict the least recently drawn quarter
-    std::vector<std::pair<uint64_t, TileKey>> age;
-    for (const auto& [k, v] : tiles_) age.emplace_back(v.used, k);
-    std::sort(age.begin(), age.end());
-    for (size_t i = 0; i < kMaxTiles / 4; ++i) {
-      auto it = tiles_.find(age[i].second);
-      ctx_.destroy_later(it->second.buf);
-      release(it->second);
-      tiles_.erase(it);
-    }
+  evict();
+}
+
+void MapRenderer::evict() {
+  // over 600 tiles or 640 MB of vertices: drop the least recently drawn down to three quarters of both,
+  // never what the last two frames drew
+  constexpr VkDeviceSize kMaxBytes = 640ull << 20;
+  if (tiles_.size() <= kMaxTiles && pool_->used() <= kMaxBytes) return;
+  std::vector<std::pair<uint64_t, TileKey>> age;
+  age.reserve(tiles_.size());
+  for (const auto& [k, v] : tiles_) age.emplace_back(v.used, k);
+  std::sort(age.begin(), age.end());
+  // decoded tiles can be large: free them on a helper thread, not in the middle of a frame
+  auto dead = std::make_shared<std::vector<std::shared_ptr<const mvt::Tile>>>();
+  for (const auto& [used, k] : age) {
+    if (tiles_.size() <= kMaxTiles * 3 / 4 && pool_->used() <= kMaxBytes * 3 / 4) break;
+    if (used + 2 > frame_) break;
+    if (k.id.z <= 8) continue;  // small, and they stand in for their children anywhere in the country
+    auto it = tiles_.find(k);
+    free_later(it->second.buf);
+    release(it->second);
+    dead->push_back(std::move(it->second.tile));
+    tiles_.erase(it);
   }
+  if (!dead->empty()) std::thread([dead]() mutable { dead.reset(); }).detach();
 }
 
 int MapRenderer::tile_zoom(double zoom, const PackZoom& p) {
@@ -491,6 +522,29 @@ std::vector<TileKey> MapRenderer::drawable(const geo::Camera& cam, const std::ve
     out.insert(out.end(), exact.begin(), exact.end());
   }
   return out;
+}
+
+void MapRenderer::coverage(const geo::Camera& cam, const std::vector<PackZoom>& packs, double& exact, double& holes) const {
+  int n = 0, ex = 0, ho = 0;
+  for (const auto& p : packs) {
+    if (cam.zoom < p.show_from) continue;
+    for (const auto& id : geo::cover(cam, tile_zoom(cam.zoom, p))) {
+      ++n;
+      TileKey k{p.pack, id};
+      if (has(k)) {
+        ++ex;
+        continue;
+      }
+      bool any = false;
+      for (auto a = id; a.z > p.minzoom && !any;) {
+        a = a.parent();
+        any = has(TileKey{p.pack, a});
+      }
+      ho += !any;
+    }
+  }
+  exact = n ? double(ex) / n : 1;
+  holes = n ? double(ho) / n : 0;
 }
 
 bool MapRenderer::load_fonts(const std::string& dir) {
@@ -609,7 +663,7 @@ void MapRenderer::draw(VkCommandBuffer cmd, const geo::Camera& cam, float dpr) {
       pc.origin[1] = float(sy * dpr);
       pc.k = float(k.id.size() * scale * dpr);
       vkCmdPushConstants(cmd, layout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Push), &pc);
-      const VkDeviceSize off = 0;
+      const VkDeviceSize off = g.buf.offset;
       vkCmdBindVertexBuffers(cmd, 0, 1, &g.buf.buf, &off);
       vkCmdDraw(cmd, count, 1, first, 0);
       vertices_ += count;
