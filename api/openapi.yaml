@@ -321,6 +321,15 @@ paths:
       responses:
         "200": { description: "Accepted fixes and how many went into the history", content: { application/json: { schema: { type: object, properties: { accepted: { type: integer }, history: { type: integer } } } } } }
         "400": { $ref: "#/components/responses/BadRequest" }
+  /v1/live/poller:
+    post:
+      operationId: setPlanePoller
+      summary: Turn the plane poller on or off at runtime
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [on], properties: { on: { type: boolean } } } } } }
+      responses:
+        "200": { description: "Poller status (running, interval_s, source, last_ok, error)", content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "503": { description: Live feeds are off }
   /v1/live/status:
     get:
       operationId: liveStatus

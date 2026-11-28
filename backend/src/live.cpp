@@ -397,7 +397,9 @@ bool PlanePoller::poll_once() {
 }
 
 void PlanePoller::start() {
+  std::lock_guard<std::mutex> life(life_);
   if (run_.exchange(true)) return;
+  if (th_.joinable()) th_.join();
   th_ = std::thread([this] {
     double next_prune = 0;
     while (run_) {
@@ -415,6 +417,7 @@ void PlanePoller::start() {
 }
 
 void PlanePoller::stop() {
+  std::lock_guard<std::mutex> life(life_);
   run_ = false;
   if (th_.joinable()) th_.join();
 }

@@ -1,6 +1,8 @@
 // Live planes and ships (store, parsers, poller, routes) and the caching layer (ETag, 304, gzip, response cache).
 #include <doctest/doctest.h>
 
+#include <atomic>
+#include <chrono>
 #include <thread>
 
 #include <httplib.h>
@@ -217,4 +219,33 @@ TEST_CASE("caching: tile ETag, JSON ETag and gzip, response cache") {
     CHECK(z->body.size() < a->body.size());
   }
   CHECK(json::parse(c.Get("/v1/cache")->body)["hits"].get<int>() >= 2);
+}
+
+TEST_CASE("plane poller can be turned on and off over HTTP") {
+  httplib::Server srv;
+  auto store = std::make_shared<gsa::live::Store>(gsa::live::Options{});
+  std::atomic<int> calls{0};
+  auto poller = std::make_shared<gsa::live::PlanePoller>(
+      store, [&](const std::string&) -> std::optional<std::string> { ++calls; return std::nullopt; }, 3600);
+  gsa::ApiConfig cfg{std::make_shared<gsa::PackStore>(GSA_DEVDATA), "", ""};
+  cfg.live = store;
+  cfg.poller = poller;
+  gsa::mount_api(srv, cfg);
+  const int port = srv.bind_to_any_port("127.0.0.1");
+  std::thread th([&] { srv.listen_after_bind(); });
+  srv.wait_until_ready();
+  httplib::Client c("127.0.0.1", port);
+  CHECK(json::parse(c.Get("/v1/live/status")->body)["planes"]["running"] == false);
+  auto r = c.Post("/v1/live/poller", R"({"on":true})", "application/json");
+  REQUIRE(r);
+  CHECK(r->status == 200);
+  CHECK(json::parse(r->body)["running"] == true);
+  for (int i = 0; i < 50 && calls < 5; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  CHECK(calls >= 5);  // one round: four adsb.lol hubs and OpenSky
+  CHECK(json::parse(c.Post("/v1/live/poller", R"({"on":false})", "application/json")->body)["running"] == false);
+  CHECK(c.Post("/v1/live/poller", R"({"on":"yes"})", "application/json")->status == 400);
+  CHECK(json::parse(c.Post("/v1/live/poller", R"({"on":true})", "application/json")->body)["running"] == true);  // restartable
+  poller->stop();
+  srv.stop();
+  th.join();
 }

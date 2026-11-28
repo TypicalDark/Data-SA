@@ -148,6 +148,18 @@ void mount_live_api(httplib::Server& srv, std::shared_ptr<live::Store> store, st
     send_json(res, json{{"accepted", fixes.size()}, {"history", stored}});
   });
 
+  // Turns the plane poller on or off at runtime (the app starts the back-end with --no-plane-poll and
+  // switches polling on only when the user turns on live planes).
+  srv.Post("/v1/live/poller", [poller](const httplib::Request& req, httplib::Response& res) {
+    if (!poller) return send_error(res, 503, "live feeds are off (start gsa-backend with --live)");
+    const json b = json::parse(req.body, nullptr, false);
+    if (b.is_discarded() || !b.is_object() || !b.contains("on") || !b["on"].is_boolean())
+      return send_error(res, 400, "body must be {\"on\": true} or {\"on\": false}");
+    if (b["on"].get<bool>()) poller->start();
+    else poller->stop();
+    send_json(res, poller->status());
+  });
+
   srv.Get("/v1/live/status", [store, poller](const httplib::Request&, httplib::Response& res) {
     json j{{"enabled", bool(store)}};
     if (store) j["store"] = store->status();
