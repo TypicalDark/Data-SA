@@ -1,0 +1,120 @@
+#include "gsa/packs.hpp"
+
+#include <algorithm>
+#include <cctype>
+#include <fstream>
+#include <iterator>
+
+namespace gsa {
+
+namespace fs = std::filesystem;
+
+bool valid_pack_id(const std::string& id) {
+  if (id.empty() || id.size() > 64) return false;
+  for (size_t i = 0; i < id.size(); ++i) {
+    const char c = id[i];
+    const bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || (i > 0 && (c == '-' || c == '_'));
+    if (!ok) return false;
+  }
+  return true;
+}
+
+PackStore::PackStore(fs::path data_dir, size_t db_connections)
+    : data_dir_(std::move(data_dir)), db_connections_(db_connections) {
+  reload();
+}
+
+void PackStore::reload() {
+  auto next = load();  // may throw; the current set stays in place then
+  std::lock_guard<std::mutex> lk(mu_);
+  set_ = std::move(next);
+}
+
+namespace {
+
+int pack_schema(sql::Pool& pool) {
+  auto db = pool.lease();
+  std::string fmt;
+  db->query("SELECT v FROM pack_info WHERE k='format'", {}, [&](const sql::Row& r) { fmt = r.text(0); });
+  const std::string prefix = "gsa-pack/";
+  if (fmt.rfind(prefix, 0) != 0) return -1;
+  try {
+    return std::stoi(fmt.substr(prefix.size()));
+  } catch (...) {
+    return -1;
+  }
+}
+
+}  // namespace
+
+std::shared_ptr<const PackSet> PackStore::load() const {
+  auto set = std::make_shared<PackSet>();
+  const fs::path packs = data_dir_ / "packs";
+  std::vector<PackInfo> found;
+
+  // installed.json is written by the pack updater; it is the source of truth when present.
+  //   {"format":"gsa-installed/1","packs":{"admin":{"kind":"tiles","version":"admin-2026-11","file":"admin/admin-2026-11.pmtiles"}}}
+  const fs::path manifest = packs / "installed.json";
+  if (fs::exists(manifest)) {
+    std::ifstream in(manifest);
+    const auto j = nlohmann::json::parse(in);
+    if (j.value("format", "gsa-installed/1") != "gsa-installed/1")
+      throw std::runtime_error("installed.json has format " + j.value("format", "") + ", which this back-end cannot read");
+    for (const auto& [id, p] : j.at("packs").items()) {
+      if (!valid_pack_id(id)) throw std::runtime_error("bad pack id in installed.json: " + id);
+      const fs::path file = (packs / p.at("file").get<std::string>()).lexically_normal();
+      // the file must stay inside packs/
+      const auto rel = file.lexically_relative(packs);
+      if (rel.empty() || *rel.begin() == "..") throw std::runtime_error("pack file outside packs/: " + id);
+      found.push_back({id, p.at("kind").get<std::string>(), p.value("version", "unknown"), file, 0,
+                       p.value("sha256", ""), p.value("region", "")});
+    }
+  } else if (fs::exists(packs)) {
+    // Development: every *.pmtiles is a tile pack named after its file; pack.sqlite is the attribute pack.
+    for (const auto& e : fs::directory_iterator(packs)) {
+      if (!e.is_regular_file()) continue;
+      const auto ext = e.path().extension().string();
+      const auto stem = e.path().stem().string();
+      if (ext == ".pmtiles" && valid_pack_id(stem)) found.push_back({stem, "tiles", "dev", e.path(), 0});
+      if (ext == ".sqlite" && stem == "pack") found.push_back({"pack", "sqlite", "dev", e.path(), 0});
+      if (ext == ".sqlite" && stem.rfind("pack-", 0) == 0 && valid_pack_id(stem)) {
+        std::string region = stem.substr(5);
+        for (auto& c : region) c = char(std::toupper(static_cast<unsigned char>(c)));
+        found.push_back({stem, "sqlite", "dev", e.path(), 0, "", region});
+      }
+      if (ext == ".json" && stem != "installed" && valid_pack_id(stem)) found.push_back({stem, "json", "dev", e.path(), 0});
+    }
+  }
+
+  for (auto& p : found) {
+    p.bytes = fs::file_size(p.file);
+    if (p.kind == "tiles") {
+      set->tiles[p.id] = std::make_shared<const pmtiles::Archive>(p.file);
+    } else if (p.kind == "sqlite") {
+      auto pool = std::make_shared<sql::Pool>(p.file, db_connections_);
+      const int schema = pack_schema(*pool);
+      if (std::find(kPackSchemas.begin(), kPackSchemas.end(), schema) == kPackSchemas.end()) {
+        throw std::runtime_error("pack " + p.id + " has schema " + std::to_string(schema) +
+                                 ", which this back-end cannot read; update the app first");
+      }
+      if (p.region.empty()) {
+        if (set->db) throw std::runtime_error("two national attribute packs installed (" + p.id + ")");
+        set->db = pool;
+      } else {
+        set->regional[p.region] = pool;
+      }
+    } else if (p.kind == "json") {
+      std::ifstream in(p.file, std::ios::binary);
+      auto body = std::make_shared<std::string>(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+      if (!nlohmann::json::accept(*body)) throw std::runtime_error("pack " + p.id + " is not valid JSON");
+      set->data[p.id] = std::move(body);
+    } else {
+      throw std::runtime_error("unknown pack kind " + p.kind);
+    }
+    set->info.push_back(p);
+  }
+  std::sort(set->info.begin(), set->info.end(), [](const auto& a, const auto& b) { return a.id < b.id; });
+  return set;
+}
+
+}  // namespace gsa

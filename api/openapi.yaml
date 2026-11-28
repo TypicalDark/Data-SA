@@ -1,0 +1,664 @@
+openapi: 3.1.0
+info:
+  title: Grid of SA API
+  version: "1.0.0"
+  description: |
+    The only interface between the Grid of SA front-end and its back-end.
+
+    The same back-end binary serves this API on a desktop (bound to 127.0.0.1 on a
+    random port, started by the Tauri shell) and on a server (a Linux container).
+    The front-end never reads files or calls any other site; it only calls this API.
+
+    Auth: every route except `/v1/health` needs `Authorization: Bearer <token>`.
+    On desktop the token is a one-time random value made by the shell for each start.
+    On a server it will be a user session token.
+
+    Privacy: no route returns owner names, ID numbers or personal contact details.
+    The data packs never contain them (POPIA rule, see docs/DATA.md).
+servers:
+  - url: http://127.0.0.1:{port}
+    description: Desktop back-end started by the shell
+    variables:
+      port: { default: "7878" }
+security:
+  - bearer: []
+paths:
+  /v1/health:
+    get:
+      operationId: getHealth
+      summary: Liveness check (no auth)
+      security: []
+      responses:
+        "200":
+          description: Back-end is up
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+  /v1/version:
+    get:
+      operationId: getVersion
+      summary: Back-end, API and data versions
+      responses:
+        "200":
+          description: Versions
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Version" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/packs:
+    get:
+      operationId: listPacks
+      summary: Installed data packs
+      responses:
+        "200":
+          description: Installed packs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Pack" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/tilejson/{pack}:
+    get:
+      operationId: getTileJson
+      summary: TileJSON 3.0 for one tile pack
+      parameters:
+        - { $ref: "#/components/parameters/Pack" }
+      responses:
+        "200":
+          description: TileJSON
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TileJson" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/tiles/{pack}/{z}/{x}/{y}:
+    get:
+      operationId: getTile
+      summary: One tile from a PMTiles pack
+      description: |
+        Returns the tile bytes as stored. Vector tiles are Mapbox Vector Tiles, usually
+        gzip-compressed, in which case `Content-Encoding: gzip` is set. A tile that is not
+        in the pack returns 204 with no body, so the map can tell "empty" from "error".
+      parameters:
+        - { $ref: "#/components/parameters/Pack" }
+        - { name: z, in: path, required: true, schema: { type: integer, minimum: 0, maximum: 24 } }
+        - { name: x, in: path, required: true, schema: { type: integer, minimum: 0 } }
+        - name: y
+          in: path
+          required: true
+          description: Tile row; an extension such as `.mvt`, `.pbf` or `.png` is allowed and ignored.
+          schema: { type: string }
+      responses:
+        "200":
+          description: Tile bytes
+          content:
+            application/vnd.mapbox-vector-tile: {}
+            image/png: {}
+            image/webp: {}
+            image/jpeg: {}
+        "204": { description: No tile at this address }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/search:
+    get:
+      operationId: search
+      summary: One search box over places, areas, facilities and plots
+      description: Searches the national pack and every installed province pack (plots), and merges the best hits.
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 200 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 12 } }
+      responses:
+        "200":
+          description: Matches, best first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SearchHit" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/areas/{id}:
+    get:
+      operationId: getArea
+      summary: One node of the place tree with its breadcrumb, children and numbers
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Area id, for example `ZA`, `WC`, `WC053`, `W10503001`.
+          schema: { type: string, maxLength: 40 }
+      responses:
+        "200":
+          description: Area
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Area" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/data/{pack}:
+    get:
+      operationId: getDataPack
+      summary: A JSON data pack as installed (the Find data, ...)
+      parameters:
+        - $ref: "#/components/parameters/Pack"
+      responses:
+        "200":
+          description: The pack's JSON, unchanged
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/parcels/{sg21}:
+    get:
+      operationId: getParcel
+      summary: "Plot card: the plot, where it sits in the place tree, and its valuation roll entries"
+      description: "Looked up in the province packs (pack-wc ...) and then the national pack; 404 when no installed province has the plot."
+      parameters:
+        - name: sg21
+          in: path
+          required: true
+          description: 21-character Surveyor-General code, for example `C05200010000002300000`. City plots without an SG code have a store key, `X` plus 20 hex digits, and no `sg` prefixes.
+          schema: { type: string, pattern: "^[A-Z][0-9A-Z]{20}$" }
+      responses:
+        "200":
+          description: Plot. No owner names or ID numbers exist in any pack (POPIA).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Parcel" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { description: The installed pack has no plots }
+  /v1/series:
+    get:
+      operationId: getSeries
+      summary: Time series of one entity (climate per ward, dam levels per dam, ...)
+      description: >
+        Without `variable`, lists the series that exist for the entity. With it, returns the whole
+        series as a regular array starting at `t0`, one value per `step`; `null` where there is no value.
+      parameters:
+        - { name: entity, in: query, required: true, description: "Area id (`W10503001`, `WC053`) or place id (`dws:D3R002`).", schema: { type: string, maxLength: 64 } }
+        - { name: variable, in: query, description: "For example `rain_mm_merra2`, `t_mean_c`, `dam_pct`.", schema: { type: string } }
+      responses:
+        "200":
+          description: A series, or the list of series for the entity
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/Series" }
+                  - { type: array, items: { $ref: "#/components/schemas/SeriesInfo" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/graph/{network}/nodes/{id}:
+    get:
+      operationId: getGraphNode
+      summary: One node of a network (substation, station, junction) with its lines
+      parameters:
+        - { name: network, in: path, required: true, schema: { type: string, enum: [power, road, water] } }
+        - { name: id, in: path, required: true, description: "The pack's node_id; grid tiles carry it as `id` on `facility` and as `source`/`target` on `line`.", schema: { type: integer } }
+      responses:
+        "200":
+          description: Node
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GraphNode" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/trace:
+    get:
+      operationId: trace
+      summary: Network trace for the TR, PATH, FEED and FAIL functions
+      description: >
+        `connected` (TR): everything reachable from `from`, optionally only over lines of at least `min_kv`.
+        `path` (PATH): shortest route by line length from `from` to `to`.
+        `feed` (FEED): the `k` nearest substations or stations of at least `source_kv` that `from` connects to, each with its route.
+        `fail` (FAIL): take out node `from` or line `edge`; returns what loses every route to a `source_kv` node.
+        Node ids are the pack's `node_id` and line ids its `edge_id`, the same `id`s the grid tiles carry,
+        so the app highlights results without fetching geometry. Inferred gap joins count as lines.
+      parameters:
+        - { name: mode, in: query, schema: { type: string, enum: [connected, path, feed, fail], default: connected } }
+        - { name: network, in: query, schema: { type: string, default: power } }
+        - { name: from, in: query, description: "Start node (all modes but `fail` by `edge`)", schema: { type: integer } }
+        - { name: to, in: query, description: "End node for `path`", schema: { type: integer } }
+        - { name: edge, in: query, description: "Line to take out for `fail`", schema: { type: integer } }
+        - { name: min_kv, in: query, description: "Use only lines of at least this voltage (`connected`, `path`)", schema: { type: integer, default: 0 } }
+        - { name: source_kv, in: query, description: "Voltage that counts as a supply source (`feed`, `fail`)", schema: { type: integer, default: 220 } }
+        - { name: k, in: query, description: "Sources to return for `feed`", schema: { type: integer, minimum: 1, maximum: 20, default: 3 } }
+        - { name: limit, in: query, description: "Most nodes to return", schema: { type: integer, minimum: 1, maximum: 200000, default: 20000 } }
+      responses:
+        "200":
+          description: Trace result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Trace" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/sources:
+    get:
+      operationId: listSources
+      summary: Data sources, licences and credits
+      responses:
+        "200":
+          description: Sources
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Source" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/live/{kinds}:
+    get:
+      operationId: getLive
+      summary: Latest positions of live planes or ships (gsa-backend --live)
+      description: "Cheap to poll: send the ETag back as If-None-Match and get 304 until a feed brings something new (or a minute passes). Planes come from the built-in poller (adsb.lol, then OpenSky), ships from tools/live/ais_feed.py."
+      parameters:
+        - { name: kinds, in: path, required: true, schema: { type: string, enum: [planes, ships] } }
+        - { name: bbox, in: query, description: "minlon,minlat,maxlon,maxlat", schema: { type: string } }
+        - { name: max_age, in: query, description: "Seconds; default 300 for planes, 1800 for ships", schema: { type: number } }
+      responses:
+        "200": { description: Latest positions, headers: { ETag: { schema: { type: string } }, Last-Modified: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/LiveList" } } } }
+        "304": { description: Not modified since the ETag sent }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "503": { description: Live feeds are off }
+  /v1/live/{kind}/{id}/track:
+    get:
+      operationId: getLiveTrack
+      summary: Position history of one plane (ICAO hex) or ship (MMSI), oldest first
+      description: Everything keeps 24 h of history (thinned to a point per 50 m or per minute); watched objects keep a year. The newest fix is appended even before it reaches the history.
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [plane, ship] } }
+        - { name: id, in: path, required: true, schema: { type: string, pattern: "^[A-Za-z0-9_.-]{1,32}$" } }
+        - { name: since, in: query, description: "Unix seconds, default 24 h ago", schema: { type: number } }
+        - { name: until, in: query, schema: { type: number } }
+        - { name: limit, in: query, description: "Most recent points kept when there are more; default 5000", schema: { type: integer, maximum: 100000 } }
+      responses:
+        "200": { description: Track, content: { application/json: { schema: { $ref: "#/components/schemas/LiveTrack" } } } }
+  /v1/live/watch:
+    get:
+      operationId: listWatch
+      summary: The watch list, with each object's latest position
+      responses:
+        "200": { description: Watched objects, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Watch" } } } } }
+  /v1/live/watch/{kind}/{id}:
+    put:
+      operationId: watch
+      summary: Keep this plane's or ship's history long term
+      requestBody: { content: { application/json: { schema: { type: object, properties: { label: { type: string, maxLength: 80 } } } } } }
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [plane, ship] } }
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "201": { description: Added }
+        "200": { description: Already watched; label updated }
+    delete:
+      operationId: unwatch
+      summary: Stop watching (history then ages out after 24 h)
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [plane, ship] } }
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/live/ingest:
+    post:
+      operationId: ingestLive
+      summary: "Feeder input: a batch of fixes for one kind"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, fixes]
+              properties:
+                kind: { type: string, enum: [plane, ship] }
+                source: { type: string, maxLength: 40 }
+                fixes: { type: array, maxItems: 50000, items: { $ref: "#/components/schemas/LiveFix" } }
+      responses:
+        "200": { description: "Accepted fixes and how many went into the history", content: { application/json: { schema: { type: object, properties: { accepted: { type: integer }, history: { type: integer } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /v1/live/poller:
+    post:
+      operationId: setPlanePoller
+      summary: Turn the plane poller on or off at runtime
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [on], properties: { on: { type: boolean } } } } } }
+      responses:
+        "200": { description: "Poller status (running, interval_s, source, last_ok, error)", content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "503": { description: Live feeds are off }
+  /v1/live/status:
+    get:
+      operationId: liveStatus
+      summary: Live store and plane poller state (counts, sources, last error)
+      responses:
+        "200": { description: Status, content: { application/json: { schema: { type: object } } } }
+  /v1/cache:
+    get:
+      operationId: cacheStats
+      summary: Response cache entries, bytes, budget and hits
+      responses:
+        "200": { description: Stats, content: { application/json: { schema: { type: object } } } }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+  parameters:
+    Pack:
+      name: pack
+      in: path
+      required: true
+      description: Pack id, for example `admin`, `grid`, `parcels-wc`.
+      schema: { type: string, pattern: "^[a-z0-9][a-z0-9_-]{0,63}$" }
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing or wrong token
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+    Health:
+      type: object
+      required: [status, uptime_s]
+      properties:
+        status: { type: string, enum: [ok] }
+        uptime_s: { type: integer }
+    Version:
+      type: object
+      required: [api, backend, packs]
+      properties:
+        api: { type: string, description: "API major version, `1`" }
+        backend: { type: string, description: "Back-end semantic version" }
+        pack_schema: { type: array, items: { type: integer }, description: "SQLite pack schema versions this back-end reads" }
+        packs:
+          type: object
+          additionalProperties: { type: string }
+          description: Installed pack id to pack version
+    Pack:
+      type: object
+      required: [id, kind, version, bytes]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [tiles, sqlite, json] }
+        version: { type: string, description: "Date version such as `admin-2026-11` or `dev`" }
+        bytes: { type: integer }
+        sha256: { type: string, description: From installed.json; absent in development mode }
+        region: { type: string, description: "Province of a split pack, e.g. WC for parcels-wc" }
+        title: { type: string }
+        tile_type: { type: string, enum: [mvt, png, jpeg, webp, avif, unknown] }
+        minzoom: { type: integer }
+        maxzoom: { type: integer }
+        bounds: { type: array, items: { type: number }, minItems: 4, maxItems: 4 }
+        layers:
+          type: array
+          items:
+            type: object
+            required: [id]
+            properties:
+              id: { type: string }
+              minzoom: { type: integer }
+              maxzoom: { type: integer }
+              fields: { type: object, additionalProperties: { type: string } }
+    TileJson:
+      type: object
+      required: [tilejson, tiles]
+      properties:
+        tilejson: { type: string }
+        name: { type: string }
+        tiles: { type: array, items: { type: string } }
+        minzoom: { type: integer }
+        maxzoom: { type: integer }
+        bounds: { type: array, items: { type: number } }
+        center: { type: array, items: { type: number } }
+        vector_layers: { type: array, items: { type: object } }
+    SearchHit:
+      type: object
+      required: [ref, kind, label]
+      properties:
+        ref: { type: string, description: "`area:WC053`, `place:123`, `node:power:42`, `parcel:<sg21>`" }
+        kind: { type: string, description: "Type tag: PROV, DIST, MUNI, WARD, SUBURB, PLACE, SUB, PLANT, PLOT" }
+        label: { type: string }
+        detail: { type: string }
+        lon: { type: number }
+        lat: { type: number }
+    AreaRef:
+      type: object
+      required: [id, level, name, kind]
+      properties:
+        id: { type: string }
+        level: { type: integer }
+        kind: { type: string }
+        name: { type: string }
+    Metric:
+      type: object
+      required: [metric, v]
+      properties:
+        metric: { type: string, description: "For example `pop_est`, `value_median`, `parcels`, `rain_mm_merra2`" }
+        as_of: { type: string }
+        v: { type: number }
+        n: { type: integer, description: "Number of items the value is computed from" }
+        source_id: { type: string }
+    Area:
+      allOf:
+        - $ref: "#/components/schemas/AreaRef"
+        - type: object
+          properties:
+            parent_id: { type: [string, "null"] }
+            bbox: { type: array, items: { type: number }, minItems: 4, maxItems: 4 }
+            center: { type: array, items: { type: number }, minItems: 2, maxItems: 2 }
+            area_km2: { type: [number, "null"] }
+            breadcrumb: { type: array, items: { $ref: "#/components/schemas/AreaRef" } }
+            metrics: { type: array, items: { $ref: "#/components/schemas/Metric" } }
+            children:
+              type: array
+              items:
+                allOf:
+                  - $ref: "#/components/schemas/AreaRef"
+                  - type: object
+                    properties:
+                      center:
+                        type: array
+                        description: Label point [lon, lat]
+                        items: { type: number }
+                        minItems: 2
+                        maxItems: 2
+                      area_km2: { type: number }
+                      metrics:
+                        type: object
+                        additionalProperties: { type: number }
+    Source:
+      type: object
+      required: [source_id, title]
+      properties:
+        source_id: { type: string }
+        title: { type: string }
+        publisher: { type: string }
+        url: { type: string }
+        licence: { type: string }
+        resale_ok: { type: boolean }
+        cadence: { type: string }
+    Parcel:
+      type: object
+      required: [sg21, kind, breadcrumb, valuations]
+      properties:
+        sg21: { type: string }
+        kind: { type: string, enum: [PLOT] }
+        parcel_kind: { type: string, description: "erf, farm, farm_portion, holding" }
+        town: { type: string }
+        parcel_no: { type: string }
+        portion_no: { type: string }
+        stand: { type: string, description: "The city's own stand label where a metro stand replaced the SG parcel (Joburg RE/54/239-IQ)" }
+        superseded_by: { type: string, description: "Set on an older SG parcel whose centre lies inside a newer metro stand; the map draws that stand instead" }
+        area_m2: { type: number }
+        center: { type: array, items: { type: number }, minItems: 2, maxItems: 2 }
+        h3_r9: { type: string }
+        sg: { type: object, description: "Prefixes of the SG code: division (4), township (8), parcel (16)", additionalProperties: { type: string } }
+        ward_id: { type: [string, "null"] }
+        suburb_id: { type: [string, "null"] }
+        breadcrumb: { type: array, items: { $ref: "#/components/schemas/AreaRef" } }
+        market_value: { type: [number, "null"], description: "Sum of the entries' market values, leaving out entries flagged zero or superseded" }
+        valuations:
+          type: array
+          items:
+            type: object
+            properties:
+              muni_code: { type: string }
+              roll: { type: string, description: "general, supplementary, KZN COGTA valuation layer, JHB GV2023 ..." }
+              roll_period: { type: string }
+              flag: { type: string, description: "superseded (a higher-priority roll values this plot) or zero (placeholder); listed but not summed" }
+              zoning: { type: string }
+              category: { type: string }
+              usage: { type: string }
+              extent_m2: { type: number }
+              market_value: { type: number }
+              sale_price: { type: number }
+              sale_date: { type: string }
+              address: { type: string }
+              source_url: { type: string, description: The roll file this entry came from }
+    SeriesInfo:
+      type: object
+      required: [series_id, variable, step]
+      properties:
+        series_id: { type: integer }
+        variable: { type: string }
+        unit: { type: string }
+        step: { type: string, enum: [day, week, month, year, event] }
+        source_id: { type: string }
+    Series:
+      type: object
+      required: [series_id, entity, variable, step, t0, values]
+      properties:
+        series_id: { type: integer }
+        entity: { type: string }
+        variable: { type: string }
+        unit: { type: string }
+        step: { type: string }
+        source_id: { type: string }
+        t0: { type: string, description: "Date of values[0] (YYYY-MM-DD); for step=event a comma list of dates, one per value" }
+        values: { type: array, items: { type: [number, "null"] } }
+    GraphNodeRef:
+      type: object
+      required: [id, kind, kv]
+      properties:
+        id: { type: integer }
+        ext_id: { type: string, description: "Source id, e.g. sub:w28088740 (OSM way)" }
+        kind: { type: string }
+        name: { type: string }
+        operator: { type: string }
+        kv: { type: integer, description: Highest voltage at the node (or of its lines) }
+        center: { type: array, items: { type: number } }
+    GraphNode:
+      allOf:
+        - { $ref: "#/components/schemas/GraphNodeRef" }
+        - type: object
+          properties:
+            network: { type: string }
+            edges:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: integer }
+                  other: { type: integer }
+                  kv: { type: integer }
+                  km: { type: number }
+                  cls: { type: string }
+                  inferred: { type: boolean }
+    TraceSet:
+      type: object
+      required: [nodes, edges, km, truncated]
+      properties:
+        nodes: { type: array, items: { type: integer } }
+        edges: { type: array, items: { type: integer } }
+        km: { type: number, description: Total line length }
+        truncated: { type: boolean, description: More nodes than limit }
+    LiveFix:
+      type: object
+      required: [id, t, lon, lat]
+      properties:
+        id: { type: string, description: ICAO hex (plane) or MMSI (ship) }
+        name: { type: string, description: Call sign / flight, or ship name }
+        t: { type: number, description: Unix seconds of the position }
+        lon: { type: number }
+        lat: { type: number }
+        alt: { type: number, description: Feet }
+        spd: { type: number, description: Knots over ground }
+        hdg: { type: number, description: Degrees }
+        extra: { type: object, description: "reg, type, gnd, vr (planes); type, callsign, imo, dest, length, nav (ships)" }
+    LiveList:
+      type: object
+      properties:
+        kind: { type: string }
+        t: { type: number }
+        n: { type: integer }
+        sources: { type: object, additionalProperties: { type: number }, description: Last ingest time per source }
+        items:
+          type: array
+          items:
+            allOf:
+              - { $ref: "#/components/schemas/LiveFix" }
+              - { type: object, properties: { src: { type: string }, watched: { type: boolean } } }
+    LiveTrack:
+      type: object
+      properties:
+        kind: { type: string }
+        id: { type: string }
+        name: { type: string }
+        watched: { type: boolean }
+        n: { type: integer }
+        fixes: { type: array, items: { type: array, description: "[t, lon, lat, alt, spd, hdg], nulls where unknown", items: { type: [number, "null"] } } }
+    Watch:
+      type: object
+      properties:
+        kind: { type: string }
+        id: { type: string }
+        label: { type: string }
+        added: { type: integer }
+        last: { $ref: "#/components/schemas/LiveFix" }
+    Trace:
+      type: object
+      required: [mode, network]
+      description: >
+        connected and path: the TraceSet fields at the top level (path adds `to` and `found`).
+        feed: `sources`, each a GraphNodeRef with `km` and `path` (a TraceSet).
+        fail: `failed_node` or `failed_edge`, and `affected` (a TraceSet of what lost supply).
+      properties:
+        mode: { type: string }
+        network: { type: string }
+        from: { $ref: "#/components/schemas/GraphNodeRef" }
+        to: { $ref: "#/components/schemas/GraphNodeRef" }
+        found: { type: boolean }
+        nodes: { type: array, items: { type: integer } }
+        edges: { type: array, items: { type: integer } }
+        km: { type: number }
+        truncated: { type: boolean }
+        source_kv: { type: integer }
+        sources:
+          type: array
+          items:
+            allOf:
+              - { $ref: "#/components/schemas/GraphNodeRef" }
+              - type: object
+                properties:
+                  km: { type: number }
+                  path: { $ref: "#/components/schemas/TraceSet" }
+        failed_node: { $ref: "#/components/schemas/GraphNodeRef" }
+        failed_edge: { type: integer }
+        affected: { $ref: "#/components/schemas/TraceSet" }
