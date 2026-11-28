@@ -9,3 +9,6 @@ __pycache__/
 *.pyc
 /GridOfSA-internal/
 shot-*.png
+# API keys stay out of git (tools/live/ais_feed.py reads them from the user's config folder)
+*.key
+live.env
