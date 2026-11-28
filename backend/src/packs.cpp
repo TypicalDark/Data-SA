@@ -1,6 +1,7 @@
 #include "gsa/packs.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <iterator>
 
@@ -57,13 +58,16 @@ std::shared_ptr<const PackSet> PackStore::load() const {
   if (fs::exists(manifest)) {
     std::ifstream in(manifest);
     const auto j = nlohmann::json::parse(in);
+    if (j.value("format", "gsa-installed/1") != "gsa-installed/1")
+      throw std::runtime_error("installed.json has format " + j.value("format", "") + ", which this back-end cannot read");
     for (const auto& [id, p] : j.at("packs").items()) {
       if (!valid_pack_id(id)) throw std::runtime_error("bad pack id in installed.json: " + id);
       const fs::path file = (packs / p.at("file").get<std::string>()).lexically_normal();
       // the file must stay inside packs/
       const auto rel = file.lexically_relative(packs);
       if (rel.empty() || *rel.begin() == "..") throw std::runtime_error("pack file outside packs/: " + id);
-      found.push_back({id, p.at("kind").get<std::string>(), p.value("version", "unknown"), file, 0});
+      found.push_back({id, p.at("kind").get<std::string>(), p.value("version", "unknown"), file, 0,
+                       p.value("sha256", ""), p.value("region", "")});
     }
   } else if (fs::exists(packs)) {
     // Development: every *.pmtiles is a tile pack named after its file; pack.sqlite is the attribute pack.
@@ -73,6 +77,11 @@ std::shared_ptr<const PackSet> PackStore::load() const {
       const auto stem = e.path().stem().string();
       if (ext == ".pmtiles" && valid_pack_id(stem)) found.push_back({stem, "tiles", "dev", e.path(), 0});
       if (ext == ".sqlite" && stem == "pack") found.push_back({"pack", "sqlite", "dev", e.path(), 0});
+      if (ext == ".sqlite" && stem.rfind("pack-", 0) == 0 && valid_pack_id(stem)) {
+        std::string region = stem.substr(5);
+        for (auto& c : region) c = char(std::toupper(static_cast<unsigned char>(c)));
+        found.push_back({stem, "sqlite", "dev", e.path(), 0, "", region});
+      }
       if (ext == ".json" && stem != "installed" && valid_pack_id(stem)) found.push_back({stem, "json", "dev", e.path(), 0});
     }
   }
@@ -88,7 +97,12 @@ std::shared_ptr<const PackSet> PackStore::load() const {
         throw std::runtime_error("pack " + p.id + " has schema " + std::to_string(schema) +
                                  ", which this back-end cannot read; update the app first");
       }
-      set->db = pool;
+      if (p.region.empty()) {
+        if (set->db) throw std::runtime_error("two national attribute packs installed (" + p.id + ")");
+        set->db = pool;
+      } else {
+        set->regional[p.region] = pool;
+      }
     } else if (p.kind == "json") {
       std::ifstream in(p.file, std::ios::binary);
       auto body = std::make_shared<std::string>(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());

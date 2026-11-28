@@ -11,6 +11,10 @@ std::string Row::text(int i) const {
   const auto* t = sqlite3_column_text(s_, i);
   return t ? std::string(reinterpret_cast<const char*>(t), size_t(sqlite3_column_bytes(s_, i))) : std::string();
 }
+std::string Row::blob(int i) const {
+  const auto* b = static_cast<const char*>(sqlite3_column_blob(s_, i));
+  return b ? std::string(b, size_t(sqlite3_column_bytes(s_, i))) : std::string();
+}
 std::optional<double> Row::opt_f64(int i) const {
   if (is_null(i)) return std::nullopt;
   return f64(i);
