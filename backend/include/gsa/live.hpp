@@ -129,6 +129,7 @@ class PlanePoller {
   Fetch fetch_;
   double interval_s_;
   std::atomic<bool> run_{false};
+  std::mutex life_;  // serialises start() and stop()
   std::thread th_;
   mutable std::mutex mu_;
   std::string last_source_, last_error_;

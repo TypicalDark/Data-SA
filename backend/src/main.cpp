@@ -105,7 +105,8 @@ int main(int argc, char** argv) {
       std::cerr << "gsa-backend: cannot open the live store: " << e.what() << "\n";
       return 1;
     }
-    if (plane_poll) poller = std::make_shared<gsa::live::PlanePoller>(live, gsa::live::curl_fetch);
+    // always made, so POST /v1/live/poller can turn it on later; --no-plane-poll only leaves it off at start
+    poller = std::make_shared<gsa::live::PlanePoller>(live, gsa::live::curl_fetch);
   }
 
   httplib::Server srv;
@@ -138,7 +139,7 @@ int main(int argc, char** argv) {
     });
     watcher.detach();
   }
-  if (poller) poller->start();
+  if (poller && plane_poll) poller->start();
   srv.listen_after_bind();
   if (poller) poller->stop();
   return 0;
