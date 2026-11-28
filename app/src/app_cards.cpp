@@ -236,6 +236,19 @@ void App::ui_home() {
   ImGui::PopTextWrapPos();
   fn_strip({"FIND", "RANK", "CMP", "AREAS", "HIST", "SAVE", "PNG"});
 
+  // short windows: the topics fold into one picker so the topic's key and lists keep the height
+  if (cam_.h < 860 && std::string(t->id) != "start") {
+    ImGui::Spacing();
+    ImGui::SetNextItemWidth(-1);
+    const std::string cur = std::string("Topic: ") + t->key + " " + t->name;
+    if (ImGui::BeginCombo("##topic", cur.c_str())) {
+      for (const auto& tp : layers::topics())
+        if (ImGui::Selectable((std::string(tp.key) + "  " + tp.name).c_str(), lstate_.topic == tp.id)) set_topic(tp.id);
+      ImGui::EndCombo();
+    }
+    ui_topic_key(*t);
+    return;
+  }
   section(font_mono_, "TOPICS");
   ImGui::PushFont(font_mono_);
   float x = 0;
@@ -702,10 +715,14 @@ void App::ui_spot(Card& c) {
       const auto pop = metric(*a, "pop_est");
       const double km2 = a->contains("area_km2") && (*a)["area_km2"].is_number() ? (*a)["area_km2"].get<double>() : 0;
       if (pop) kv_row("People", fmt_num(*pop));
-      if (pop && km2 > 0) kv_row("People per km\xc2\xb2", fmt_num(*pop / km2));
+      if (pop && km2 > 0) kv_row("People per km\xc2\xb2", find::fmt_num(std::round(*pop / km2)));
       if (const auto v = metric(*a, "value_median")) kv_row("Median property value", fmt_rand(*v));
       if (const auto v = metric(*a, "parcels")) kv_row("Valued plots", fmt_num(*v));
-      if (ImGui::SmallButton(("Open " + title).c_str())) open_area(id, false);
+      ImGui::Spacing();
+      ImGui::PushFont(font_mono_);
+      const std::string open_l = "Open " + title + " \xe2\x80\xba";
+      if (chip(open_l.c_str(), false, ImVec2(ImGui::CalcTextSize(open_l.c_str()).x + 18, 24))) open_area(id, false);
+      ImGui::PopFont();
     } else {
       ImGui::TextColored(col(kMuted), "Loading ...");
     }

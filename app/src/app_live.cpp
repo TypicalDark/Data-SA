@@ -326,7 +326,8 @@ void App::live_draw() {
       px = sx, py = sy;
     }
   }
-  const bool labels_all = cam_.zoom >= 9.5;
+  // name everything once zoomed in, or sooner when only a few are about
+  const bool labels_all = cam_.zoom >= 9.5 || (cam_.zoom >= 7.5 && planes_.items.size() + ships_.items.size() < 60);
   auto label = [&](float x, float y, const std::string& s, ImU32 colour, bool ring) {
     const float dx = ring ? 14.0f : 8.0f;
     dl->AddText(font_mono_, 11, ImVec2(x + dx + 1, y - 7), IM_COL32(4, 10, 14, 220), s.c_str());
@@ -521,9 +522,9 @@ void App::ui_panel_live() {
     for (const char* k : {"ship", "plane"}) {
       if (!st.contains(k) || !st[k].is_object()) continue;
       const auto& o = st[k];
-      std::string v2 = find::fmt_num(num(o, "latest", 0)) + " now";
-      if (const double m = num(o, "modified", 0); m > 0) v2 += " \xc2\xb7 last news " + ago(wall_now() - m);
-      line(k == std::string("ship") ? "Ships" : "Plane store", v2);
+      std::string v2 = std::to_string(long(num(o, "latest", 0))) + " known";
+      if (const double m = num(o, "modified", 0); m > 0) v2 += " \xc2\xb7 newest fix " + ago(wall_now() - m);
+      line(k == std::string("ship") ? "Ships kept" : "Planes kept", v2);
     }
   } else {
     ImGui::TextColored(col(kFaint), "Asking the back-end ...");
@@ -544,10 +545,39 @@ void App::ui_panel_live() {
       const double x = geo::mx(it.lon), y = geo::my(it.lat);
       return x >= x0 && x <= x1 && y >= y0 && y <= y1;
     };
-    for (const auto& it : planes_.items) np += in(it);
-    for (const auto& it : ships_.items) ns += in(it);
+    std::vector<const LiveItem*> list;
+    for (const auto& it : planes_.items)
+      if (in(it)) ++np, list.push_back(&it);
+    for (const auto& it : ships_.items)
+      if (in(it)) ++ns, list.push_back(&it);
     if (planes_.on) line("Planes", std::to_string(np));
     if (ships_.on) line("Ships", std::to_string(ns));
+    // the newest first, each one opens its card
+    std::sort(list.begin(), list.end(), [](auto* a, auto* b) { return a->t > b->t; });
+    auto* dl = ImGui::GetWindowDrawList();
+    const float w = ImGui::GetContentRegionAvail().x;
+    const double now = wall_now();
+    for (size_t i = 0; i < list.size() && i < 8; ++i) {
+      const auto& it = *list[i];
+      ImGui::PushID(int(i));
+      const ImVec2 q = ImGui::GetCursorScreenPos();
+      const bool click = ImGui::Selectable("##it", false, 0, ImVec2(0, 24));
+      ImGui::PopID();
+      const bool plane = it.kind == "plane";
+      dl->AddText(font_mono_, 10.5f, ImVec2(q.x + 2, q.y + 5), u32(kFaint), plane ? "PLANE" : "SHIP");
+      dl->AddText(ImVec2(q.x + 50, q.y + 3), u32(kInk), (it.name.empty() ? it.id : it.name).c_str());
+      std::string d;
+      if (plane && it.alt >= 0) d = std::to_string(int(std::lround(it.alt * 3.28084 / 100))) + "00 ft \xc2\xb7 ";
+      if (!plane && it.spd >= 0) d = std::to_string(int(std::lround(it.spd * 1.94384))) + " kn \xc2\xb7 ";
+      d += ago(now - it.t);
+      const float dw = font_mono_->CalcTextSizeA(11.5f, FLT_MAX, 0, d.c_str()).x;
+      dl->AddText(font_mono_, 11.5f, ImVec2(q.x + w - dw, q.y + 5), u32(kMuted), d.c_str());
+      if (click) {
+        open_live(it);
+        return;
+      }
+    }
+    if (list.size() > 8) ImGui::TextColored(col(kFaint), "and %d more", int(list.size() - 8));
   }
   section(font_mono_, ("WATCHED \xc2\xb7 " + std::to_string(watched_.size())).c_str());
   if (watched_.empty()) {

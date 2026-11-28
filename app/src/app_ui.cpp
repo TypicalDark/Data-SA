@@ -209,7 +209,7 @@ void App::ui_side() {
   const bool auto_fold = panel_ != Panel::None && h < 860 && panel_ != Panel::Filter;
   dock_folded_now_ = dock_fold_ || (auto_fold && !dock_force_open_);
   // open: tall enough for the rows on the map (header, tabs and base row are 132 px), at most 42% of the window
-  const float dock_max = std::clamp(h * 0.42f, 230.0f, 330.0f);
+  const float dock_max = std::clamp(h * (h < 860 ? 0.36f : 0.42f), 230.0f, 330.0f);
   const float dock_h = dock_folded_now_ ? 40.0f : std::clamp(132.0f + dock_rows_used_ + 8.0f, std::min(190.0f, dock_max), dock_max);
   ui_search(x, 0, w);
   dl->AddLine(ImVec2(x, search_h), ImVec2(x + w, search_h), u32(kLine));
