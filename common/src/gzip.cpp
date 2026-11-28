@@ -40,4 +40,21 @@ std::vector<uint8_t> gunzip(const uint8_t* data, size_t n, size_t max_out) {
   return out;
 }
 
+std::string gzip(const char* data, size_t n, int level) {
+  z_stream s{};
+  // 16 + MAX_WBITS: write a gzip header and trailer
+  if (deflateInit2(&s, level, Z_DEFLATED, 16 + MAX_WBITS, 8, Z_DEFAULT_STRATEGY) != Z_OK) throw std::runtime_error("deflateInit2 failed");
+  std::string out;
+  out.resize(deflateBound(&s, static_cast<uLong>(n)));
+  s.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(data));
+  s.avail_in = static_cast<uInt>(n);
+  s.next_out = reinterpret_cast<Bytef*>(out.data());
+  s.avail_out = static_cast<uInt>(out.size());
+  const int rc = deflate(&s, Z_FINISH);
+  out.resize(s.total_out);
+  deflateEnd(&s);
+  if (rc != Z_STREAM_END) throw std::runtime_error("deflate failed");
+  return out;
+}
+
 }  // namespace gsa

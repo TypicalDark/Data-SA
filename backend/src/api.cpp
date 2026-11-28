@@ -5,8 +5,15 @@
 #include <chrono>
 #include <map>
 
+#include <list>
+#include <mutex>
+#include <unordered_map>
+
 #include <httplib.h>
 #include <nlohmann/json.hpp>
+
+#include "gsa/gzip.hpp"
+#include "gsa/live.hpp"
 
 namespace gsa {
 
@@ -210,8 +217,19 @@ void handle_tile(const Ctx& ctx, const httplib::Request& req, httplib::Response&
   const auto set = ctx.packs();
   const auto it = set->tiles.find(pack);
   if (it == set->tiles.end()) return send_error(res, 404, "no tile pack " + pack);
-  const auto tile = it->second->tile(uint8_t(z), x, y);
+  // A tile changes only when its pack does, so the pack version (and sha256) makes a strong ETag and a
+  // client that has the tile gets a 304 without the tile being read.
+  std::string ver = "dev";
+  for (const auto& p : set->info)
+    if (p.id == pack) ver = p.version + "-" + p.sha256.substr(0, 12) + "-" + std::to_string(p.bytes);
+  const std::string etag = "\"" + pack + "-" + ver + "-" + std::to_string(z) + "-" + std::to_string(x) + "-" + std::to_string(y) + "\"";
+  res.set_header("ETag", etag);
   res.set_header("Cache-Control", "private, max-age=3600");
+  if (req.get_header_value("If-None-Match") == etag) {
+    res.status = 304;
+    return;
+  }
+  const auto tile = it->second->tile(uint8_t(z), x, y);
   if (!tile) {
     res.status = 204;
     return;
@@ -283,29 +301,151 @@ bool token_equal(const std::string& a, const std::string& b) {
   return diff == 0;
 }
 
+// In-memory cache of pack-backed GET answers (areas, search, plot cards, series, traces), keyed by URL
+// and emptied whenever the pack snapshot changes, so a pack swap never serves an old answer. Least recently used
+// entries go first once the byte budget is spent.
+class ResponseCache {
+ public:
+  explicit ResponseCache(size_t budget) : budget_(budget) {}
+  struct Entry {
+    int status;
+    std::string type, body, etag;
+  };
+  std::optional<Entry> get(const std::shared_ptr<const PackSet>& snap, const std::string& key) {
+    std::lock_guard<std::mutex> lk(mu_);
+    sync(snap);
+    const auto it = map_.find(key);
+    if (it == map_.end()) return std::nullopt;
+    lru_.splice(lru_.begin(), lru_, it->second);
+    ++hits_;
+    return it->second->second;
+  }
+  void put(const std::shared_ptr<const PackSet>& snap, const std::string& key, Entry e) {
+    const size_t sz = e.body.size() + key.size() + 64;
+    if (budget_ == 0 || sz > budget_ / 8) return;
+    std::lock_guard<std::mutex> lk(mu_);
+    sync(snap);
+    const std::string& k = key;
+    if (map_.count(k)) return;
+    lru_.emplace_front(k, std::move(e));
+    map_[k] = lru_.begin();
+    used_ += sz;
+    while (used_ > budget_ && !lru_.empty()) {
+      used_ -= lru_.back().second.body.size() + lru_.back().first.size() + 64;
+      map_.erase(lru_.back().first);
+      lru_.pop_back();
+    }
+  }
+  json stats() {
+    std::lock_guard<std::mutex> lk(mu_);
+    return json{{"entries", map_.size()}, {"bytes", used_}, {"budget", budget_}, {"hits", hits_}};
+  }
+
+ private:
+  // A pack swap empties the cache (a weak pointer, so a freed snapshot's address can never match a new one).
+  void sync(const std::shared_ptr<const PackSet>& snap) {
+    if (cur_.lock() == snap) return;
+    map_.clear();
+    lru_.clear();
+    used_ = 0;
+    cur_ = snap;
+  }
+  std::weak_ptr<const PackSet> cur_;
+  size_t budget_, used_ = 0;
+  uint64_t hits_ = 0;
+  std::mutex mu_;
+  std::list<std::pair<std::string, Entry>> lru_;
+  std::unordered_map<std::string, std::list<std::pair<std::string, Entry>>::iterator> map_;
+};
+
+bool cacheable(const httplib::Request& req) {
+  if (req.method != "GET") return false;
+  for (const char* p : {"/v1/areas/", "/v1/search", "/v1/parcels/", "/v1/series", "/v1/trace", "/v1/graph/", "/v1/sources"})
+    if (req.path.rfind(p, 0) == 0) return true;
+  return false;
+}
+
+std::string fnv_etag(const std::string& body) {
+  uint64_t h = 1469598103934665603ull;
+  for (unsigned char c : body) h = (h ^ c) * 1099511628211ull;
+  char b[24];
+  std::snprintf(b, sizeof b, "\"%016llx\"", static_cast<unsigned long long>(h));
+  return b;
+}
+
+bool accepts_gzip(const httplib::Request& req) {
+  return req.get_header_value("Accept-Encoding").find("gzip") != std::string::npos;
+}
+
 void mount_api(httplib::Server& srv, ApiConfig cfg) {
   auto ctx = std::make_shared<Ctx>(Ctx{std::move(cfg)});
+  auto cache = std::make_shared<ResponseCache>(ctx->cfg.cache_bytes);
 
-  srv.set_pre_routing_handler([ctx](const httplib::Request& req, httplib::Response& res) {
+  srv.set_pre_routing_handler([ctx, cache](const httplib::Request& req, httplib::Response& res) {
     if (!ctx->cfg.allowed_origin.empty()) {
       res.set_header("Access-Control-Allow-Origin", ctx->cfg.allowed_origin);
-      res.set_header("Access-Control-Allow-Headers", "Authorization");
+      res.set_header("Access-Control-Allow-Headers", "Authorization, Content-Type, If-None-Match");
+      res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+      res.set_header("Access-Control-Expose-Headers", "ETag, Last-Modified, X-Cache");
       res.set_header("Vary", "Origin");
     }
     if (req.method == "OPTIONS") {
       res.status = 204;
       return httplib::Server::HandlerResponse::Handled;
     }
-    if (req.path.rfind("/v1/", 0) != 0 || req.path == "/v1/health" || ctx->cfg.token.empty()) {
-      return httplib::Server::HandlerResponse::Unhandled;
+    if (req.path.rfind("/v1/", 0) != 0) return httplib::Server::HandlerResponse::Unhandled;
+    if (req.path != "/v1/health" && !ctx->cfg.token.empty()) {
+      const std::string auth = req.get_header_value("Authorization");
+      const std::string prefix = "Bearer ";
+      if (!(auth.rfind(prefix, 0) == 0 && token_equal(auth.substr(prefix.size()), ctx->cfg.token))) {
+        send_error(res, 401, "missing or wrong token");
+        return httplib::Server::HandlerResponse::Handled;
+      }
     }
-    const std::string auth = req.get_header_value("Authorization");
-    const std::string prefix = "Bearer ";
-    if (auth.rfind(prefix, 0) == 0 && token_equal(auth.substr(prefix.size()), ctx->cfg.token)) {
-      return httplib::Server::HandlerResponse::Unhandled;
+    if (cacheable(req)) {
+      if (auto e = cache->get(ctx->packs(), req.target)) {
+        res.status = e->status;
+        res.set_content(e->body, e->type);
+        res.set_header("ETag", e->etag);
+        res.set_header("X-Cache", "hit");
+        return httplib::Server::HandlerResponse::Handled;
+      }
     }
-    send_error(res, 401, "missing or wrong token");
-    return httplib::Server::HandlerResponse::Handled;
+    return httplib::Server::HandlerResponse::Unhandled;
+  });
+
+  // After every handler: remember cacheable answers, then ETag + 304 and gzip for JSON, which is where
+  // most of the bytes go (area cards, search, traces, live lists).
+  srv.set_post_routing_handler([ctx, cache](const httplib::Request& req, httplib::Response& res) {
+    if (req.method != "GET" || res.status != 200 || res.has_header("Content-Encoding")) return;
+    const std::string type = res.get_header_value("Content-Type");
+    if (type.rfind("application/json", 0) != 0) return;
+    std::string etag = res.get_header_value("ETag");
+    if (etag.empty()) {
+      etag = fnv_etag(res.body);
+      res.set_header("ETag", etag);
+    }
+    if (cacheable(req) && !res.has_header("X-Cache")) {
+      cache->put(ctx->packs(), req.target, ResponseCache::Entry{res.status, type, res.body, etag});
+    }
+    // httplib has already set Content-Length from the body by now, so it is rewritten after any change
+    auto set_length = [&res] {
+      res.headers.erase("Content-Length");
+      res.set_header("Content-Length", std::to_string(res.body.size()));
+    };
+    if (req.get_header_value("If-None-Match") == etag) {
+      res.status = 304;
+      res.body.clear();
+      res.headers.erase("Content-Type");
+      set_length();
+      return;
+    }
+    if (res.body.size() >= 1024 && accepts_gzip(req)) {
+      res.body = gsa::gzip(res.body.data(), res.body.size(), 5);
+      res.set_header("Content-Encoding", "gzip");
+      res.set_header("Vary", "Accept-Encoding");
+      set_length();
+    }
   });
 
   srv.set_exception_handler([](const httplib::Request&, httplib::Response& res, std::exception_ptr ep) {
@@ -369,6 +509,9 @@ void mount_api(httplib::Server& srv, ApiConfig cfg) {
   });
 
   mount_data_api(srv, ctx->cfg.store);  // plots, time series, grid graph (api_data.cpp)
+  mount_live_api(srv, ctx->cfg.live, ctx->cfg.poller);  // live planes and ships (api_live.cpp)
+
+  srv.Get("/v1/cache", [cache](const httplib::Request&, httplib::Response& res) { send_json(res, cache->stats()); });
 
   srv.Get("/v1/search", [ctx](const httplib::Request& req, httplib::Response& res) { handle_search(*ctx, req, res); });
 

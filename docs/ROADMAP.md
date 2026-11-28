@@ -32,7 +32,7 @@ seven milestones across the steps above:
 | C | Find with distance conditions and party, Rank, Filter, full spot summary | done: Find, Rank, spot summary, Filter, Measure v2 (path, area, circle), watchlist in-view / fit / CSV, views keep Find. Waiting on data: ward margins (full ward results), routes along roads (F) |
 | D | TR, FAIL, FEED, PATH on the grid network | back-end done (PR 2): `/v1/trace`; app side in progress |
 | E | Base map: roads, land use, buildings, terrain, 3D, plots, themes | in progress: `base` pack (roads, rail, land use, landmarks, towns, street names) `buildings` pack (44.2M footprints, GSB1) with all five base toggles, and `parcels` pack (9M plots, roll values) with plot cards; terrain shading from `raster-relief`; 3D tilt with extruded buildings. Left: terrain as a raised surface |
-| F | Reach, Analyse, live feeds | |
+| F | Reach, Analyse, live feeds | back-end live store, history, watch list and plane poller done (PR 2); ship feeder `tools/live/ais_feed.py`; app side next |
 | G | Updates, signing, installer (needs the code-signing account and hosting) | |
 
 A usable internal Windows build exists from PR 1 on (CI artifact `GridOfSA-internal-windows-x64`).

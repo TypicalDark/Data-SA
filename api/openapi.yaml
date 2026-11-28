@@ -250,6 +250,89 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/Source" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/live/{kinds}:
+    get:
+      operationId: getLive
+      summary: Latest positions of live planes or ships (gsa-backend --live)
+      description: "Cheap to poll: send the ETag back as If-None-Match and get 304 until a feed brings something new (or a minute passes). Planes come from the built-in poller (adsb.lol, then OpenSky), ships from tools/live/ais_feed.py."
+      parameters:
+        - { name: kinds, in: path, required: true, schema: { type: string, enum: [planes, ships] } }
+        - { name: bbox, in: query, description: "minlon,minlat,maxlon,maxlat", schema: { type: string } }
+        - { name: max_age, in: query, description: "Seconds; default 300 for planes, 1800 for ships", schema: { type: number } }
+      responses:
+        "200": { description: Latest positions, headers: { ETag: { schema: { type: string } }, Last-Modified: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/LiveList" } } } }
+        "304": { description: Not modified since the ETag sent }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "503": { description: Live feeds are off }
+  /v1/live/{kind}/{id}/track:
+    get:
+      operationId: getLiveTrack
+      summary: Position history of one plane (ICAO hex) or ship (MMSI), oldest first
+      description: Everything keeps 24 h of history (thinned to a point per 50 m or per minute); watched objects keep a year. The newest fix is appended even before it reaches the history.
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [plane, ship] } }
+        - { name: id, in: path, required: true, schema: { type: string, pattern: "^[A-Za-z0-9_.-]{1,32}$" } }
+        - { name: since, in: query, description: "Unix seconds, default 24 h ago", schema: { type: number } }
+        - { name: until, in: query, schema: { type: number } }
+        - { name: limit, in: query, description: "Most recent points kept when there are more; default 5000", schema: { type: integer, maximum: 100000 } }
+      responses:
+        "200": { description: Track, content: { application/json: { schema: { $ref: "#/components/schemas/LiveTrack" } } } }
+  /v1/live/watch:
+    get:
+      operationId: listWatch
+      summary: The watch list, with each object's latest position
+      responses:
+        "200": { description: Watched objects, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Watch" } } } } }
+  /v1/live/watch/{kind}/{id}:
+    put:
+      operationId: watch
+      summary: Keep this plane's or ship's history long term
+      requestBody: { content: { application/json: { schema: { type: object, properties: { label: { type: string, maxLength: 80 } } } } } }
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [plane, ship] } }
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "201": { description: Added }
+        "200": { description: Already watched; label updated }
+    delete:
+      operationId: unwatch
+      summary: Stop watching (history then ages out after 24 h)
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [plane, ship] } }
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/live/ingest:
+    post:
+      operationId: ingestLive
+      summary: "Feeder input: a batch of fixes for one kind"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, fixes]
+              properties:
+                kind: { type: string, enum: [plane, ship] }
+                source: { type: string, maxLength: 40 }
+                fixes: { type: array, maxItems: 50000, items: { $ref: "#/components/schemas/LiveFix" } }
+      responses:
+        "200": { description: "Accepted fixes and how many went into the history", content: { application/json: { schema: { type: object, properties: { accepted: { type: integer }, history: { type: integer } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /v1/live/status:
+    get:
+      operationId: liveStatus
+      summary: Live store and plane poller state (counts, sources, last error)
+      responses:
+        "200": { description: Status, content: { application/json: { schema: { type: object } } } }
+  /v1/cache:
+    get:
+      operationId: cacheStats
+      summary: Response cache entries, bytes, budget and hits
+      responses:
+        "200": { description: Stats, content: { application/json: { schema: { type: object } } } }
 components:
   securitySchemes:
     bearer: { type: http, scheme: bearer }
@@ -497,6 +580,49 @@ components:
         edges: { type: array, items: { type: integer } }
         km: { type: number, description: Total line length }
         truncated: { type: boolean, description: More nodes than limit }
+    LiveFix:
+      type: object
+      required: [id, t, lon, lat]
+      properties:
+        id: { type: string, description: ICAO hex (plane) or MMSI (ship) }
+        name: { type: string, description: Call sign / flight, or ship name }
+        t: { type: number, description: Unix seconds of the position }
+        lon: { type: number }
+        lat: { type: number }
+        alt: { type: number, description: Feet }
+        spd: { type: number, description: Knots over ground }
+        hdg: { type: number, description: Degrees }
+        extra: { type: object, description: "reg, type, gnd, vr (planes); type, callsign, imo, dest, length, nav (ships)" }
+    LiveList:
+      type: object
+      properties:
+        kind: { type: string }
+        t: { type: number }
+        n: { type: integer }
+        sources: { type: object, additionalProperties: { type: number }, description: Last ingest time per source }
+        items:
+          type: array
+          items:
+            allOf:
+              - { $ref: "#/components/schemas/LiveFix" }
+              - { type: object, properties: { src: { type: string }, watched: { type: boolean } } }
+    LiveTrack:
+      type: object
+      properties:
+        kind: { type: string }
+        id: { type: string }
+        name: { type: string }
+        watched: { type: boolean }
+        n: { type: integer }
+        fixes: { type: array, items: { type: array, description: "[t, lon, lat, alt, spd, hdg], nulls where unknown", items: { type: [number, "null"] } } }
+    Watch:
+      type: object
+      properties:
+        kind: { type: string }
+        id: { type: string }
+        label: { type: string }
+        added: { type: integer }
+        last: { $ref: "#/components/schemas/LiveFix" }
     Trace:
       type: object
       required: [mode, network]

@@ -28,6 +28,15 @@ that should sync later (saved views, watchlists) will go through the API.
   `/v1/graph/{network}/nodes/{id}` and `/v1/trace` (modes connected, path, feed, fail). The graph is
   built in memory from the pack's `node` and `edge` tables on first use (`graph.cpp`, about 20,000 lines
   for the national grid) and cached per pack snapshot, so a pack swap rebuilds it.
+- Live planes and ships (`live.cpp`, `api_live.cpp`, `gsa-backend --live`): latest positions in memory,
+  a thinned history in `<data>/cache/live.sqlite` (24 h for everything, a year for the watch list),
+  `/v1/live/{planes,ships}`, `/v1/live/{kind}/{id}/track`, `/v1/live/watch`, `/v1/live/ingest`. Planes are
+  polled every 20 s from adsb.lol (OpenSky if it fails) with the system curl, so no TLS library is linked;
+  ships come from `tools/live/ais_feed.py` (aisstream.io, the user's key).
+- Caching (`api.cpp`): tiles carry an ETag from their pack's version and sha256 (304 without reading the
+  tile); JSON answers get an ETag (304) and gzip above 1 KB; pack-backed GETs (areas, search, plots,
+  series, traces) are kept in a 64 MB LRU (`--cache-mb`) that empties when the packs change. `/v1/cache`
+  shows hits.
 - SQLite pack schema is versioned (`pack_info.format = gsa-pack/1`). The back-end lists the schemas it
   reads in `/v1/version`; it refuses a pack it cannot read and says to update the app first.
 - Auth: `Authorization: Bearer <token>` on every route but `/v1/health`. The token comes from the

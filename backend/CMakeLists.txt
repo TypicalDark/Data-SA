@@ -1,6 +1,8 @@
 add_library(gsa_backend_core STATIC
   src/api.cpp
   src/api_data.cpp
+  src/api_live.cpp
+  src/live.cpp
   src/graph.cpp
   src/packs.cpp
   src/pmtiles.cpp
@@ -21,7 +23,7 @@ gsa_warnings(gsa-backend)
 install(TARGETS gsa-backend RUNTIME DESTINATION bin)
 
 if(GSA_BUILD_TESTS)
-  add_executable(gsa_backend_tests tests/test_pmtiles.cpp tests/test_api.cpp tests/test_data_api.cpp tests/main.cpp)
+  add_executable(gsa_backend_tests tests/test_pmtiles.cpp tests/test_api.cpp tests/test_data_api.cpp tests/test_live.cpp tests/main.cpp)
   target_link_libraries(gsa_backend_tests PRIVATE gsa_backend_core doctest::doctest)
   target_compile_definitions(gsa_backend_tests PRIVATE GSA_DEVDATA="${PROJECT_SOURCE_DIR}/devdata")
   gsa_warnings(gsa_backend_tests)
