@@ -250,6 +250,10 @@ void App::ui_home() {
   }
   ImGui::PopFont();
 
+  if (std::string(t->id) != "start") {
+    ui_topic_key(*t);
+    return;
+  }
   section(font_mono_, "START FROM");
   const json* za = area_data("ZA");
   if (ImGui::Selectable("South Africa")) open_area("ZA");
@@ -272,6 +276,183 @@ void App::ui_home() {
                      "Click the map to open a place, right-click for what is here. Type a name or a command in the search box: "
                      "\"GO soweto\", \"apollo DES\", \"ADD dams\".");
   ImGui::PopTextWrapPos();
+}
+
+// A topic's own card body: what the colours mean, and for the grid what is in view, in place of the
+// country list the Overview shows.
+void App::ui_topic_key(const layers::Topic& t) {
+  auto* dl = ImGui::GetWindowDrawList();
+  const float w = ImGui::GetContentRegionAvail().x;
+  auto swatch_rows = [&](const std::vector<style::LegendItem>& items, bool round) {
+    float lx = 0;
+    for (const auto& it : items) {
+      const float iw = font_small_->CalcTextSizeA(12, FLT_MAX, 0, it.label.c_str()).x + 24;
+      if (lx > 0 && lx + iw < w) ImGui::SameLine(0, 10);
+      else lx = 0;
+      lx += iw + 10;
+      const ImVec2 q = ImGui::GetCursorScreenPos();
+      if (round) dl->AddCircleFilled(ImVec2(q.x + 5, q.y + 9), 5, u32(it.colour));
+      else dl->AddRectFilled(ImVec2(q.x, q.y + 4), ImVec2(q.x + 11, q.y + 15), u32(it.colour), 2);
+      dl->AddText(font_small_, 12, ImVec2(q.x + 16, q.y + 2), u32(kMuted), it.label.c_str());
+      ImGui::Dummy(ImVec2(iw, 19));
+    }
+  };
+  auto note = [&](const std::string& s) {
+    if (s.empty()) return;
+    ImGui::PushFont(font_small_);
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextColored(col(kFaint), "%s", s.c_str());
+    ImGui::PopTextWrapPos();
+    ImGui::PopFont();
+  };
+  const auto ms = layers::map_style(lstate_);
+  auto mw_str = [](double mw) {  // "30 412 MW"
+    std::string d = std::to_string(long(std::round(mw)));
+    for (int i = int(d.size()) - 3; i > 0; i -= 3) d.insert(size_t(i), " ");
+    return d + " MW";
+  };
+  bool any = false;
+  // the colour of the municipalities
+  if (ms.fill != style::Topic::Overview) {
+    const auto lg = style::legend(ms.fill);
+    if (!lg.items.empty()) {
+      section(font_mono_, ("KEY \xc2\xb7 " + lg.title).c_str());
+      swatch_rows(lg.items, false);
+      note(lg.note);
+      any = true;
+    }
+  }
+  if (ms.lines || ms.subs) {
+    const auto lg = style::legend(style::Topic::Energy);
+    section(font_mono_, "KEY \xc2\xb7 LINES AND SUBSTATIONS BY VOLTAGE");
+    swatch_rows(lg.items, false);
+    note(lg.note);
+    any = true;
+  }
+  // what is in view: power stations by fuel and size, the biggest first
+  if (ms.plants || ms.subs) {
+    struct Fuel {
+      std::string fuel;
+      double mw = 0;
+      int n = 0;
+    };
+    std::vector<Fuel> fuels;
+    std::vector<const map_labels::FeatureRef*> big;
+    int subs = 0;
+    double mw_all = 0;
+    for (const auto& r : map_->drawn_facilities()) {
+      const auto& f = r.feature();
+      if (f.str("kind") != "power_station") {
+        ++subs;
+        continue;
+      }
+      std::string fu = f.str("fuel");
+      if (fu.empty()) fu = "other";
+      auto it = std::find_if(fuels.begin(), fuels.end(), [&](const Fuel& x) { return x.fuel == fu; });
+      if (it == fuels.end()) it = fuels.insert(fuels.end(), Fuel{fu});
+      const double mw = f.num("mw").value_or(0);
+      it->mw += mw;
+      it->n++;
+      mw_all += mw;
+      big.push_back(&r);
+    }
+    section(font_mono_, "IN VIEW");
+    if (big.empty() && !subs) {
+      note(cam_.zoom < 5.5 ? "Zoom in to a province to count what is in view." : "Nothing from the grid is drawn here.");
+    } else {
+      kv_row("Substations", std::to_string(subs));
+      kv_row("Power stations", std::to_string(big.size()) + (mw_all > 0 ? " \xc2\xb7 " + mw_str(mw_all) : ""));
+      std::sort(fuels.begin(), fuels.end(), [](const Fuel& a, const Fuel& b) { return a.mw != b.mw ? a.mw > b.mw : a.n > b.n; });
+      std::vector<style::LegendItem> fl;
+      for (const auto& x : fuels)
+        fl.push_back({x.fuel + (x.mw > 0 ? " " + mw_str(x.mw) : " \xc3\x97" + std::to_string(x.n)),
+                      style::plant(x.fuel)});
+      if (!fl.empty()) {
+        ImGui::Spacing();
+        swatch_rows(fl, true);
+      }
+      std::sort(big.begin(), big.end(), [](auto* a, auto* b) {
+        return a->feature().num("mw").value_or(0) > b->feature().num("mw").value_or(0);
+      });
+      if (!big.empty()) section(font_mono_, "BIGGEST STATIONS IN VIEW");
+      for (size_t i = 0; i < big.size() && i < 5; ++i) {
+        const auto& f = big[i]->feature();
+        std::string name = f.str("name");
+        if (name.empty()) name = "(no name)";
+        const auto mw = f.num("mw");
+        const std::string d = (mw ? mw_str(*mw) : std::string("? MW")) + " \xc2\xb7 " + f.str("fuel");
+        ImGui::PushID(big[i]);
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        const bool click = ImGui::Selectable("##b", false, 0, ImVec2(0, 24));
+        dl->AddCircleFilled(ImVec2(p.x + 6, p.y + 12), 4.5f, u32(style::plant(f.str("fuel"))));
+        dl->AddText(ImVec2(p.x + 18, p.y + 3), u32(kInk), name.c_str());
+        const float dw = font_mono_->CalcTextSizeA(11.5f, FLT_MAX, 0, d.c_str()).x;
+        dl->AddText(font_mono_, 11.5f, ImVec2(p.x + w - dw, p.y + 5), u32(kMuted), d.c_str());
+        ImGui::PopID();
+        if (click) {
+          open_facility(*big[i]);
+          return;
+        }
+      }
+    }
+    any = true;
+  }
+  // dam levels in view, the emptiest first (the website's dam card, as a list)
+  if (lstate_.shows("x:damlvl")) {
+    struct Dam {
+      std::string name;
+      double pct, mcm, wx, wy;
+    };
+    std::vector<Dam> dams;
+    std::set<std::string> seen;
+    map_->points("web-water", "x_damlvl", [&](const mvt::Feature& f, double wx, double wy) {
+      double sx, sy;
+      cam_.to_screen(wx, wy, sx, sy);
+      if (sx < side_w() || sx > cam_.w || sy < 0 || sy > cam_.h) return;
+      const auto pct = f.num("pct");
+      if (!pct || !seen.insert(f.str("name")).second) return;
+      dams.push_back({f.str("name"), *pct, f.num("mcm").value_or(0), wx, wy});
+    });
+    section(font_mono_, ("DAM LEVELS IN VIEW \xc2\xb7 " + std::to_string(dams.size())).c_str());
+    if (dams.empty()) note("No dams with a level this week are in view.");
+    else {
+      double cap = 0, held = 0;
+      for (const auto& d : dams) cap += d.mcm, held += d.mcm * d.pct / 100;
+      if (cap > 0) kv_row("Full, weighted by size", std::to_string(int(std::round(100 * held / cap))) + "%");
+      std::sort(dams.begin(), dams.end(), [](const Dam& a, const Dam& b) { return a.pct < b.pct; });
+      for (size_t i = 0; i < dams.size() && i < 6; ++i) {
+        const auto& d = dams[i];
+        ImGui::PushID(int(i));
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        if (ImGui::Selectable("##d", false, 0, ImVec2(0, 24))) fly_to(geo::lon_of(d.wx), geo::lat_of(d.wy), std::max(cam_.zoom, 10.0));
+        ImGui::PopID();
+        const float bw = 70, bx = p.x + w - bw;
+        const char* c = d.pct < 30 ? "#ff5d5d" : d.pct < 60 ? kWarn : kOk;
+        dl->AddText(ImVec2(p.x + 2, p.y + 3), u32(kInk), d.name.c_str());
+        const std::string v = std::to_string(int(std::round(d.pct))) + "%";
+        const float vw = font_mono_->CalcTextSizeA(11.5f, FLT_MAX, 0, v.c_str()).x;
+        dl->AddText(font_mono_, 11.5f, ImVec2(bx - vw - 8, p.y + 5), u32(kMuted), v.c_str());
+        dl->AddRectFilled(ImVec2(bx, p.y + 9), ImVec2(bx + bw, p.y + 15), u32(kLine), 2);
+        dl->AddRectFilled(ImVec2(bx, p.y + 9), ImVec2(bx + bw * float(std::clamp(d.pct, 0.0, 100.0) / 100), p.y + 15), u32(c), 2);
+      }
+      note("DWS weekly state of dams; the emptiest first. Click one to go there.");
+    }
+    any = true;
+  }
+  // the topic's other layers: their swatch and what they are
+  std::vector<style::LegendItem> other;
+  for (const auto* lid : t.layers) {
+    const std::string l = lid;
+    if (l == "lines" || l == "subs" || l == "plants" || !lstate_.shows(l)) continue;
+    if (l == "c:ward" && ms.fill == style::Topic::Elections) continue;  // the party key above
+    if (const auto* d = layers::find(l)) other.push_back({d->name, style::hex(d->colour)});
+  }
+  if (!other.empty()) {
+    section(font_mono_, any ? "ALSO ON THE MAP" : "KEY");
+    swatch_rows(other, false);
+  }
+  ImGui::Spacing();
+  note("Click anything on the map to open it. Shift+F clears the filters; the panel below turns layers on and off.");
 }
 
 void App::ui_area(const std::string& id) {
@@ -768,8 +949,10 @@ void App::ui_panel_find() {
     // Rank: the website's RANK list; substations and power stations come from the drawn grid
     const auto& defs = find::rank_defs();
     const find::RankDef* cur = &defs[0];
+    // nothing chosen yet: rank municipalities unless the grid is on the map
+    const std::string want = !rank_key_.empty() ? rank_key_ : lstate_.shows("subs") ? "subs" : "mpop";
     for (const auto& d : defs)
-      if (rank_key_ == d.k) cur = &d;
+      if (want == d.k) cur = &d;
     ImGui::SetNextItemWidth(-1);
     if (ImGui::BeginCombo("##rank", cur->label)) {
       for (const auto& d : defs)
@@ -805,12 +988,29 @@ void App::ui_panel_find() {
     }
     ImGui::PushFont(font_mono_);
     section(font_mono_, ("IN VIEW \xc2\xb7 " + std::to_string(rows.size())).c_str());
-    if (!rows.empty() && chip("CSV", false, ImVec2(44, 20))) copy_csv(rows);
+    if (!rows.empty()) {  // CSV sits at the right end of the heading
+      ImGui::SameLine(ImGui::GetContentRegionMax().x - 44);
+      ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 3);
+      if (chip("CSV", false, ImVec2(44, 20))) copy_csv(rows);
+    }
     ImGui::PopFont();
     if (cur->needs_data && !fdata_) ImGui::TextColored(col(kFaint), "Needs the Find data pack (find.json).");
-    else if (rows.empty())
-      ImGui::TextColored(col(kFaint), cur->needs_data ? "Nothing of this kind in view. Zoom out or pan."
-                                                      : "Put the grid on the map (key 2) and zoom in to rank it.");
+    else if (rows.empty()) {
+      ImGui::PushTextWrapPos(0);
+      const bool grid_on = lstate_.shows("subs") || lstate_.shows("plants");
+      ImGui::TextColored(col(kFaint), "%s", cur->needs_data ? "Nothing of this kind in view. Zoom out or pan."
+                                            : grid_on ? "Nothing drawn in view yet. Zoom in to a province or a city."
+                                                      : "This ranks what the map draws, and the grid is not on the map.");
+      ImGui::PopTextWrapPos();
+      if (!cur->needs_data) {
+        ImGui::Spacing();
+        ImGui::PushFont(font_mono_);
+        if (!grid_on && chip("Put the grid on", false, ImVec2(130, 26))) set_topic("grid");
+        if (!grid_on) ImGui::SameLine(0, 6);
+        if (chip("Rank municipalities instead", false, ImVec2(210, 26))) rank_key_ = "mpop";
+        ImGui::PopFont();
+      }
+    }
     if (!rows.empty()) rows_list(rows, "rank", -24);
     else ImGui::Dummy(ImVec2(0, std::max(0.0f, ImGui::GetContentRegionAvail().y - 24)));
     ImGui::TextColored(col(kFaint), "The list follows the map as you pan and zoom.");

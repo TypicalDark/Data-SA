@@ -110,6 +110,7 @@ struct CompareRow {
   std::string label;
   std::vector<std::string> cells;
   int hi = -1, lo = -1;  // columns with the highest and lowest figure (-1 when fewer than 2 figures)
+  int better = 0;        // +1 when higher is better, -1 when lower is better, 0 when neither
 };
 std::vector<CompareRow> compare(const std::vector<const Muni*>& ms);
 std::string compare_csv(const std::vector<const Muni*>& ms);

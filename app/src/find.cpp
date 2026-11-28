@@ -232,11 +232,21 @@ std::string fmt_measure(const Measure& m, double v) {
   return fmt_num(v) + " " + u;
 }
 
+namespace {
+// Which way is good: fewer jobless and fewer informal homes are better; size, density and price are neither.
+int better_dir(const std::string& k) {
+  if (k == "un" || k == "inf") return -1;
+  if (k == "pop" || k == "dens" || k == "med") return 0;
+  return 1;
+}
+}  // namespace
+
 std::vector<CompareRow> compare(const std::vector<const Muni*>& ms) {
   std::vector<CompareRow> out;
-  auto row = [&](const std::string& label, auto value, auto text) {
+  auto row = [&](const std::string& label, auto value, auto text, int better) {
     CompareRow r;
     r.label = label;
+    r.better = better;
     double hi = -1e300, lo = 1e300;
     int n = 0;
     for (size_t i = 0; i < ms.size(); ++i) {
@@ -253,11 +263,11 @@ std::vector<CompareRow> compare(const std::vector<const Muni*>& ms) {
   for (const auto& m : measures()) {
     if (std::string(m.key) == "wsa") continue;  // not in the national file yet
     row(m.label, [&](const Muni& u) { return u.*m.field; },
-        [&](const Muni& u) { return fmt_measure(m, u.*m.field); });
+        [&](const Muni& u) { return fmt_measure(m, u.*m.field); }, better_dir(m.key));
     if (std::string(m.key) == "med")
       row("Most wards won", [](const Muni&) { return -1.0; }, [](const Muni& u) {
         return u.win.empty() ? std::string("\xe2\x80\x93") : u.win + " " + std::to_string(u.win_wards) + "/" + std::to_string(u.wards);
-      });
+      }, 0);
   }
   return out;
 }
@@ -477,7 +487,12 @@ std::string why(const Data& d, const Muni& m, const std::vector<Rule>& rules) {
       part = m.win.empty() ? "no result" : m.win + " " + std::to_string(m.win_wards) + "/" + std::to_string(m.wards);
     else {
       const auto [o, dist] = nearest(d, m, r);
-      part = !o ? "none near" : dist < 1 ? o->name + " inside" : std::to_string(int(std::lround(dist))) + " km to " + o->name;
+      // say what the place is: "Jupiter substation inside", "12 km to Vaal Dam"
+      const std::string noun = r.k == "nearCap" ? "substation" : r.k == "nearSt" ? "power station" : r.k == "nearAir" ? "airport" : "";
+      std::string nm = o ? o->name : "", low = nm;
+      std::transform(low.begin(), low.end(), low.begin(), [](unsigned char ch) { return char(std::tolower(ch)); });
+      if (!noun.empty() && low.find(noun.substr(noun.rfind(' ') + 1)) == std::string::npos) nm += " " + noun;
+      part = !o ? "none near" : dist < 1 ? nm + " inside" : std::to_string(int(std::lround(dist))) + " km to " + nm;
     }
     if (!out.empty()) out += " \xc2\xb7 ";
     out += part;

@@ -273,7 +273,10 @@ void App::ui_compare() {
       ImGui::PushID(int(i));
       ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - 14);
       ImGui::PushStyleColor(ImGuiCol_Text, col(kAccent));
-      ImGui::TextUnformatted(ms[i]->name.c_str());
+      std::string nm = ms[i]->name;  // "City of Johannesburg" -> "Johannesburg": the columns are narrow
+      for (const char* pre : {"City of ", "Metropolitan Municipality of "})
+        if (nm.rfind(pre, 0) == 0) nm = nm.substr(std::strlen(pre));
+      ImGui::TextUnformatted(nm.c_str());
       ImGui::PopStyleColor();
       ImGui::PopTextWrapPos();
       if (ImGui::IsItemClicked()) open_area(ms[i]->code);
@@ -301,14 +304,16 @@ void App::ui_compare() {
         ImGui::TableNextColumn();
         ImGui::PushFont(font_mono_);
         const bool hi = int(i) == r.hi, lo = int(i) == r.lo;
-        ImGui::TextColored(col(hi ? kOk : lo ? kWarn : kInk), "%s", r.cells[i].c_str());
+        const bool good = (hi && r.better > 0) || (lo && r.better < 0), bad = (hi && r.better < 0) || (lo && r.better > 0);
+        ImGui::TextColored(col(good ? kOk : bad ? kWarn : kInk), "%s", r.cells[i].c_str());
         ImGui::PopFont();
         if (hi || lo) {  // a small triangle: up for the highest, down for the lowest
           const ImVec2 q = ImGui::GetItemRectMax(), q0 = ImGui::GetItemRectMin();
           const float cx = q.x + 7, cy = (q0.y + q.y) / 2;
           auto* dl = ImGui::GetWindowDrawList();
-          if (hi) dl->AddTriangleFilled(ImVec2(cx - 3.5f, cy + 2.5f), ImVec2(cx + 3.5f, cy + 2.5f), ImVec2(cx, cy - 3), u32(kOk));
-          else dl->AddTriangleFilled(ImVec2(cx - 3.5f, cy - 2.5f), ImVec2(cx + 3.5f, cy - 2.5f), ImVec2(cx, cy + 3), u32(kWarn));
+          const ImU32 tc = u32(good ? kOk : bad ? kWarn : kMuted);
+          if (hi) dl->AddTriangleFilled(ImVec2(cx - 3.5f, cy + 2.5f), ImVec2(cx + 3.5f, cy + 2.5f), ImVec2(cx, cy - 3), tc);
+          else dl->AddTriangleFilled(ImVec2(cx - 3.5f, cy - 2.5f), ImVec2(cx + 3.5f, cy - 2.5f), ImVec2(cx, cy + 3), tc);
         }
       }
     }
@@ -318,7 +323,7 @@ void App::ui_compare() {
   ImGui::Spacing();
   ImGui::PushTextWrapPos(0);
   ImGui::PushFont(font_small_);
-  ImGui::TextColored(col(kFaint), "Green is the highest figure in a row, amber the lowest. Jobs, income, education and "
+  ImGui::TextColored(col(kFaint), "Triangles mark the highest and lowest figure in a row; green is the better end, amber the worse. Jobs, income, education and "
                                   "services are Census 2011, weighted by 2022 ward population; values are municipal "
                                   "roll medians.");
   ImGui::PopFont();

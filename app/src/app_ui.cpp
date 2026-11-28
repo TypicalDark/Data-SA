@@ -200,7 +200,17 @@ void App::ui_side() {
   dl->AddLine(ImVec2(x + w - 0.5f, 0), ImVec2(x + w - 0.5f, h), u32(kLine));
   block_window();
   const float search_h = 79;
-  const float dock_h = std::clamp(h * 0.42f, 230.0f, 330.0f);
+  // the On the map dock folds to its header while a panel needs the height (short windows), or
+  // whenever the user folds it
+  if (panel_ != dock_panel_) {
+    dock_panel_ = panel_;
+    dock_force_open_ = false;
+  }
+  const bool auto_fold = panel_ != Panel::None && h < 860 && panel_ != Panel::Filter;
+  dock_folded_now_ = dock_fold_ || (auto_fold && !dock_force_open_);
+  // open: tall enough for the rows on the map (header, tabs and base row are 132 px), at most 42% of the window
+  const float dock_max = std::clamp(h * 0.42f, 230.0f, 330.0f);
+  const float dock_h = dock_folded_now_ ? 40.0f : std::clamp(132.0f + dock_rows_used_ + 8.0f, std::min(190.0f, dock_max), dock_max);
   ui_search(x, 0, w);
   dl->AddLine(ImVec2(x, search_h), ImVec2(x + w, search_h), u32(kLine));
   ui_main(x, search_h + 1, w, h - search_h - dock_h - 1);
@@ -479,9 +489,28 @@ void App::ui_main(float x, float y, float w, float h) {
 void App::ui_dock(float x, float y, float w, float h) {
   auto* dl = ImGui::GetWindowDrawList();
   const float pad = 8;
-  ImGui::SetCursorScreenPos(ImVec2(x + 12, y + 10));
+  // the header folds and unfolds the dock
+  ImGui::SetCursorScreenPos(ImVec2(x + 4, y + 4));
+  if (ImGui::InvisibleButton("##dockfold", ImVec2(150, 28))) {
+    if (dock_folded_now_) {
+      dock_fold_ = false;
+      dock_force_open_ = true;
+    } else {
+      dock_fold_ = true;
+    }
+  }
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip(dock_folded_now_ ? "Show the layers on the map" : "Fold the layer list");
+  {
+    const float cx = x + 16, cy = y + 17;
+    if (dock_folded_now_)
+      dl->AddTriangleFilled(ImVec2(cx - 3, cy - 4), ImVec2(cx - 3, cy + 4), ImVec2(cx + 3, cy), u32(kMuted));
+    else
+      dl->AddTriangleFilled(ImVec2(cx - 4, cy - 2.5f), ImVec2(cx + 4, cy - 2.5f), ImVec2(cx, cy + 3.5f), u32(kMuted));
+  }
+  ImGui::SetCursorScreenPos(ImVec2(x + 26, y + 10));
   ImGui::PushFont(font_mono_);
-  ImGui::TextColored(col(kMuted), "ON THE MAP");
+  if (dock_folded_now_) ImGui::TextColored(col(kMuted), "ON THE MAP \xc2\xb7 %d", int(lstate_.on.size()));
+  else ImGui::TextColored(col(kMuted), "ON THE MAP");
   ImGui::PopFont();
   // Clear all, + Add
   ImGui::SetCursorScreenPos(ImVec2(x + w - 162, y + 6));
@@ -498,6 +527,7 @@ void App::ui_dock(float x, float y, float w, float h) {
   if (chip("+ Add", true, ImVec2(60, 22))) catalogue_open_ = !catalogue_open_;
   ImGui::PopStyleColor();
   ImGui::PopStyleVar(2);
+  if (dock_folded_now_) return;
 
   // group tabs, five to a row
   const float tw = (w - 2 * pad - 4 * 4) / 5, th = 24;
@@ -592,7 +622,9 @@ void App::ui_dock(float x, float y, float w, float h) {
       icons::draw(cdl, icons::Id::Plus, ImVec2(x0.x + bw / 2, x0.y + rh / 2), 14, u32(kAccent), 1.3f);
     }
     // the colour layer shows its legend under the row
-    if (focus && have && !hidden) {
+    // (the topic card above already shows the key, so the dock leaves it out then)
+    const bool topic_key = panel_ == Panel::None && !cards_.empty() && cards_.back().kind == Card::Home && lstate_.topic != "start";
+    if (focus && have && !hidden && !topic_key) {
       const auto ms = layers::map_style(lstate_);
       style::Legend lg;
       if (layers::is_choropleth(d->id)) lg = style::legend(ms.fill);
@@ -622,6 +654,7 @@ void App::ui_dock(float x, float y, float w, float h) {
     }
     ImGui::PopID();
   }
+  dock_rows_used_ = group_tab_ == "on" ? ImGui::GetCursorPosY() : 1e4f;  // the dock shrinks to what it lists
   ImGui::EndChild();
 
   // base map toggles

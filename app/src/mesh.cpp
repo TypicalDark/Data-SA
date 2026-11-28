@@ -225,15 +225,22 @@ void build(const std::string& pack, const mvt::Tile& tile, const layers::MapStyl
               add_polygon(f, style::party(f.str("party"), pass ? 0.8f : 0.1f).packed(), out.fill);
               outline(f, 0.3f, style::hex("#0b161d", 0.6f).packed(), 8.0f, out.lines);
             } else {
-              add_polygon(f, with_alpha(base, 0.26f), out.fill);
-              outline(f, 0.5f, with_alpha(base, 0.85f), 7.0f, out.lines);  // edges once zoomed in
+              // layers that tile the whole country (service areas, who supplies) stay a wash so the grid reads on top
+              const bool cover = e.layer == "zones" || e.layer == "x_supauth";
+              add_polygon(f, with_alpha(base, cover ? 0.07f : 0.26f), out.fill);
+              outline(f, cover ? 0.4f : 0.5f, with_alpha(base, cover ? 0.5f : 0.85f), cover ? 8.0f : 7.0f, out.lines);  // edges once zoomed in
             }
             break;
           }
           case mvt::GeomType::Line: {
             // flight routes are many long arcs: keep them faint so the country stays readable
             const bool faint = e.layer == "x_flights";
-            for (const auto& part : f.parts) add_line(part, faint ? 0.5f : 0.8f, with_alpha(base, faint ? 0.35f : 0.9f), 0, false, out.lines);
+            float lw = faint ? 0.5f : 0.8f, la = faint ? 0.35f : 0.9f;
+            if (e.layer == "rivers") {  // the website's widthScale: thin at country zooms, full width from z12
+              lw = std::clamp(0.25f + float(z - 5) * 0.1f, 0.25f, 0.95f) * (f.num("k").value_or(0) == 1 ? 0.7f : 1.0f);
+              la = z < 8 ? 0.7f : 0.85f;
+            }
+            for (const auto& part : f.parts) add_line(part, lw, with_alpha(base, la), 0, false, out.lines);
             break;
           }
           case mvt::GeomType::Point:

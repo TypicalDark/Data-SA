@@ -100,6 +100,7 @@ class App {
   void block_window();
   // cards
   void ui_home();
+  void ui_topic_key(const layers::Topic& t);  // a topic's legend and what is in view, under its card
   void ui_area(const std::string& id);
   void ui_facility(Card& c);
   void ui_spot(Card& c);
@@ -277,6 +278,9 @@ class App {
   layers::State lstate_;
   std::set<std::string> avail_;
   bool side_open_ = true;
+  bool dock_fold_ = false, dock_force_open_ = false, dock_folded_now_ = false;
+  Panel dock_panel_ = Panel::None;
+  float dock_rows_used_ = 200;  // height of the dock's rows last frame
   Panel panel_ = Panel::None;
   int find_tab_ = 0;  // Find panel tab: 0 Find, 1 Rank, 2 Compare
   // Find and Rank (find.hpp) over the Find data pack
@@ -284,7 +288,7 @@ class App {
   JsonFuture fdata_req_;
   std::vector<find::Rule> rules_;
   std::set<std::string> fpass_;
-  std::string rank_key_ = "subs";
+  std::string rank_key_;  // empty: municipalities, or substations when the grid is on
   std::string find_toast_;
   layers::Filters filter_;
   bool filter_vote_tab_ = false;

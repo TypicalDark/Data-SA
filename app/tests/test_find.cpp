@@ -119,6 +119,9 @@ TEST_CASE("Census measures: Find both ways, Rank, Compare") {
   CHECK(cmp[0].label == "People");
   CHECK(cmp[0].hi == 0);
   CHECK(cmp[0].lo == 1);
+  CHECK(cmp[0].better == 0);  // more people is neither better nor worse
+  for (const auto& cr : cmp)
+    if (cr.label == "Unemployment rate") CHECK(cr.better == -1);
   const std::string csv = find::compare_csv({jhb, ovs});
   CHECK(csv.rfind("measure,City of Johannesburg,Overstrand\n", 0) == 0);
 }
