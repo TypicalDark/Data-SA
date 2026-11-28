@@ -1,8 +1,12 @@
-"""Live ships for gsa-backend: aisstream.io positions around South Africa, posted to /v1/live/ingest.
+r"""Live ships for gsa-backend: aisstream.io positions around South Africa, posted to /v1/live/ingest.
 
-    set AISSTREAM_KEY=...             (free key from aisstream.io; never put it on the command line)
-    set GSA_TOKEN=...                 (the back-end's token; not needed with --no-auth)
-    python ais_feed.py --backend http://127.0.0.1:PORT [--bbox -38,14,-20,36] [--every 10]
+    python ais_feed.py --backend http://127.0.0.1:PORT [--bbox -38,14,-20,36] [--every 10] [--key-file PATH]
+
+The aisstream.io key is read from AISSTREAM_KEY, else from a key file (one line, the key only):
+    Windows        %APPDATA%\GridOfSA\aisstream.key
+    macOS / Linux  ~/.config/gridofsa/aisstream.key
+The file lives outside the repository on purpose; never commit it or put the key on the command line.
+GSA_TOKEN is the back-end's token (not needed with --no-auth).
 
 Standard library only. Connects to wss://stream.aisstream.io/v0/stream (through HTTPS_PROXY when set),
 keeps the newest position per ship, and every --every seconds posts the batch to the back-end, which keeps
@@ -123,13 +127,27 @@ def post(backend, token, fixes):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with opener.open(req, timeout=30) as r: return json.loads(r.read())
 
+def default_key_file():
+    if os.name == "nt":
+        return os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "GridOfSA", "aisstream.key")
+    return os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "gridofsa", "aisstream.key")
+
+def read_key(path):
+    key = os.environ.get("AISSTREAM_KEY", "").strip()
+    if key: return key
+    try:
+        with open(path, encoding="utf-8") as f: return f.read().strip()
+    except OSError:
+        return ""
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--backend", required=True); ap.add_argument("--bbox", default="-38,14,-20,36", help="minlat,minlon,maxlat,maxlon")
     ap.add_argument("--every", type=float, default=10)
+    ap.add_argument("--key-file", default=default_key_file())
     a = ap.parse_args()
-    key = os.environ.get("AISSTREAM_KEY"); token = os.environ.get("GSA_TOKEN", "")
-    if not key: sys.exit("set AISSTREAM_KEY (free at aisstream.io)")
+    key = read_key(a.key_file); token = os.environ.get("GSA_TOKEN", "")
+    if not key: sys.exit(f"no aisstream.io key: set AISSTREAM_KEY or save the key in {a.key_file}")
     la0, lo0, la1, lo1 = map(float, a.bbox.split(","))
     sub = json.dumps({"APIKey": key, "BoundingBoxes": [[[la0, lo0], [la1, lo1]]],
                       "FilterMessageTypes": ["PositionReport", "StandardClassBPositionReport", "ExtendedClassBPositionReport", "ShipStaticData", "StaticDataReport"]})
