@@ -52,9 +52,13 @@ that should sync later (saved views, watchlists) will go through the API.
   constants place each tile relative to the camera in double precision, so there is no float jitter at
   plot zoom. Each tile clips to its own square in the fragment shader, so tile buffers never draw twice.
   Draw order: all fills, then all lines, then all symbols.
-- **Tiles.** Four loader threads fetch through the API, inflate and decode MVT (protozero). The main
-  thread tessellates (earcut for polygons, extruded quads for lines) and uploads. While a tile loads,
-  its nearest loaded ancestor stands in. Least recently drawn tiles are evicted past 600.
+- **Tiles.** Four loader threads fetch through the API, inflate and decode MVT (protozero). A mesh
+  pool (up to four threads) tessellates (earcut for polygons, extruded quads for lines); the main
+  thread only copies finished meshes into GPU buffers. A style change bumps a generation, re-queues the
+  visible tiles first, and the old meshes keep drawing until the new ones land, so nothing flashes.
+  While a tile loads, its nearest loaded ancestor stands in. When the view's tiles are all in, the
+  loader prefetches a 1.8x margin around it (flat views only). Least recently drawn tiles are evicted
+  past 600. Scripted screenshots print a `load:` line (time to settle, worst frame, frames over 33 ms).
 - **Text and icons.** A second pipeline draws map text and point icons from one distance-field
   atlas (R8, 1024 x 1024): glyphs are rendered on first use with stb_truetype at 24 px and drawn
   at any size with a sharp edge and a halo from the same texture; icons (square, circle, diamond,
@@ -113,6 +117,23 @@ that should sync later (saved views, watchlists) will go through the API.
   current view (substations, power stations, free capacity, dams lowest first, municipalities by value
   or people, airports). The spot card adds the website's summary (nearest town, dam, free capacity,
   airport, port, and which Find conditions the spot fails). Saved views keep the conditions.
+- **Topic cards.** A topic's card shows its key (voltage bands, party colours, value bands) and what is
+  in view: substations, power stations by fuel and MW with the biggest listed, dam levels emptiest
+  first. The Overview card lists the provinces instead.
+- **Compare, Keep, History, Near, Report** (`app_extra.cpp`, the website's v70 functions). Compare
+  (CMP) puts up to six municipalities side by side, marking each row's highest and lowest, green for
+  the better end and amber for the worse, with CSV. KEEP pins a card above the stack. Every change of
+  layers, topic, Find or Compare is a step in History (Ctrl+Z, Ctrl+Shift+Z, HIST panel). NEAR opens
+  what is within 10 to 100 km (towns, schools, clinics, police, dams, airports, ports, grid room,
+  stations). REPORT writes a one-page HTML report (map image, figures, sources) to Documents. Active
+  Find conditions and filters show as chips over the map (Shift+F clears them).
+- **Live planes and ships** (`app_live.cpp`, F5). With Planes or Ships on, the app polls
+  `/v1/live/{planes,ships}` for the view (planes every 10 s, ships every 20 s, ETag so an unchanged
+  answer is a 304) and turns the back-end's plane poller on and off with it. Trails come from
+  `/v1/live/{kind}/{id}/track` for the open card, kept cards and watched items, refreshed every 30 s
+  and broken at gaps. Planes are arrows coloured by altitude, ships hulls coloured by AIS type; watched
+  ones get an amber ring. The card has Watch (the back-end keeps a watched track for a year, others
+  for 24 hours) and Follow; the Live panel shows feed health, what is in view and the watch list.
 - **Filters** (`layers::Filters`, F3). The website's filter panel: power lines and substations by
   voltage band, power stations by fuel, 2026 ward winners by party, turnout band and province. What
   fails is dimmed in the mesh and icon passes, or left out with "hide". Filters are saved settings.
