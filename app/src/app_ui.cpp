@@ -26,20 +26,6 @@ constexpr ImGuiWindowFlags kFixed = ImGuiWindowFlags_NoDecoration | ImGuiWindowF
                                     ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoFocusOnAppearing;
 
 
-// A flat outlined button like the website's .btn / chips: text centred, accent border when on.
-bool chip(const char* label, bool on, ImVec2 size, bool enabled = true) {
-  ImGui::PushStyleColor(ImGuiCol_Border, on ? col(kAccent) : col(kLine));
-  ImGui::PushStyleColor(ImGuiCol_Text, !enabled ? col(kFaint) : on ? col(kInk) : col(kMuted));
-  ImGui::PushStyleColor(ImGuiCol_Button, on ? col(kHover) : ImVec4(0, 0, 0, 0));
-  ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 3);
-  ImGui::BeginDisabled(!enabled);
-  const bool r = ImGui::Button(label, size);
-  ImGui::EndDisabled();
-  ImGui::PopStyleVar();
-  ImGui::PopStyleColor(3);
-  return r;
-}
-
 }  // namespace
 
 void App::block_window() {
@@ -59,10 +45,27 @@ void App::ui() {
     dl->AddCircle(p, 11, u32(kAccent), 0, 2.0f);
     if (c.kind == Card::Spot) dl->AddCircleFilled(p, 3, u32(kAccent));
   }
+  if (const Card& c = cards_.back(); c.kind == Card::Near) {
+    // the NEAR circle on the ground
+    const double km = c.props.value("km", 25.0), dlat = km / 111.0, dlon = dlat / std::cos(c.lat * geo::kPi / 180);
+    std::vector<ImVec2> ring;
+    for (int i = 0; i < 96; ++i) {
+      const double t = i * 2 * geo::kPi / 96;
+      double sx, sy;
+      cam_.to_screen(geo::mx(c.lon + dlon * std::cos(t)), geo::my(c.lat + dlat * std::sin(t)), sx, sy);
+      ring.push_back(ImVec2(float(sx), float(sy)));
+    }
+    auto* dl = ImGui::GetBackgroundDrawList();
+    dl->AddPolyline(ring.data(), int(ring.size()), u32(kAccent, 0.7f), ImDrawFlags_Closed, 1.6f);
+    double sx, sy;
+    cam_.to_screen(geo::mx(c.lon), geo::my(c.lat), sx, sy);
+    dl->AddCircleFilled(ImVec2(float(sx), float(sy)), 3.5f, u32(kAccent));
+  }
   ui_measure();
   ui_rail();
   ui_side();
   ui_crumb();
+  ui_filter_strip();
   ui_controls();
   ui_status();
   if (catalogue_open_) ui_catalogue();
@@ -117,7 +120,7 @@ void App::ui_rail() {
       panel(icons::Id::Filter, "FILTER", Panel::Filter, "Filter what is drawn (F3)"),
       Item{icons::Id::Find, "FIND", [this] { return panel_ == Panel::Find; },
            [this] {
-             find_rank_ = false;
+             find_tab_ = 0;
              open_panel(Panel::Find);
            },
            "Find places where... (N)"},
@@ -186,7 +189,7 @@ void App::ui_side() {
     ImGui::PopStyleVar();
     return;
   }
-  const float x = kRailW, w = kSideW;
+  const float x = kRailW, w = side_w();
   ImGui::SetNextWindowPos(ImVec2(x, 0));
   ImGui::SetNextWindowSize(ImVec2(w, h));
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
@@ -264,6 +267,10 @@ void App::ui_search(float x, float y, float w) {
       query_[0] = 0;
       hits_.clear();
       ImGui::SetWindowFocus(nullptr);
+    } else if (const auto t = tasks_for(line); !t.empty()) {
+      query_[0] = 0;
+      run_command(t[0].command);
+      ImGui::SetWindowFocus(nullptr);
     } else {
       toast("Nothing found for " + line);
     }
@@ -311,10 +318,39 @@ void App::ui_main(float x, float y, float w, float h) {
     ImGui::PushTextWrapPos(0);
     ImGui::TextColored(col(kFaint), "A name, then a function also works: \"apollo DES\", \"tshwane NEAR\".");
     ImGui::PopTextWrapPos();
-  } else if (!hits_.empty() && query_[0]) {
-    ImGui::PushFont(font_mono_);
-    ImGui::TextColored(col(kMuted), "RESULTS");
-    ImGui::PopFont();
+  } else if (query_[0] && (!hits_.empty() || !tasks_for(q).empty())) {
+    // what you may want to do: the ranking, preset or tool that fits the words
+    const auto tasks = tasks_for(q);
+    if (!tasks.empty()) {
+      ImGui::PushFont(font_mono_);
+      ImGui::TextColored(col(kMuted), "DO");
+      ImGui::PopFont();
+      for (size_t i = 0; i < tasks.size(); ++i) {
+        ImGui::PushID(int(i) + 500);
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        if (ImGui::Selectable("##t", false, 0, ImVec2(0, 26))) {
+          const std::string cmd = tasks[i].command;
+          query_[0] = 0;
+          hits_.clear();
+          run_command(cmd);
+          ImGui::PopID();
+          break;
+        }
+        auto* dl = ImGui::GetWindowDrawList();
+        const std::string code = tasks[i].command.substr(0, tasks[i].command.find(' '));
+        const ImVec2 ts = font_mono_->CalcTextSizeA(10, FLT_MAX, 0, code.c_str());
+        dl->AddRect(ImVec2(p.x, p.y + 5), ImVec2(p.x + ts.x + 10, p.y + 19), u32(kAccent), 3);
+        dl->AddText(font_mono_, 10, ImVec2(p.x + 5, p.y + 6), u32(kAccent), code.c_str());
+        dl->AddText(ImVec2(p.x + ts.x + 18, p.y + 4), u32(kInk), tasks[i].label.c_str());
+        ImGui::PopID();
+      }
+      ImGui::Spacing();
+    }
+    if (!hits_.empty()) {
+      ImGui::PushFont(font_mono_);
+      ImGui::TextColored(col(kMuted), "PLACES");
+      ImGui::PopFont();
+    }
     for (size_t i = 0; i < hits_.size(); ++i) {
       const auto& hit = hits_[i];
       ImGui::PushID(int(i));
@@ -343,6 +379,7 @@ void App::ui_main(float x, float y, float w, float h) {
       case Panel::Views: ui_panel_views(); break;
       case Panel::Watch: ui_panel_watch(); break;
       case Panel::Keys: ui_panel_keys(); break;
+      case Panel::History: ui_panel_history(); break;
       case Panel::Measure: {
         if (close_button()) {
           measuring_ = false;
@@ -424,12 +461,14 @@ void App::ui_main(float x, float y, float w, float h) {
       case Panel::None: break;
     }
   } else {
+    if (!kept_.empty()) ui_kept();
     Card& c = cards_.back();
     switch (c.kind) {
       case Card::Home: ui_home(); break;
       case Card::Area: ui_area(c.id); break;
       case Card::Facility: ui_facility(c); break;
       case Card::Spot: ui_spot(c); break;
+      case Card::Near: ui_near(c); break;
     }
   }
   ImGui::EndChild();

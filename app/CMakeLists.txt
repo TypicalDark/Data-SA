@@ -42,7 +42,8 @@ if(WIN32)
 endif()
 gsa_warnings(gsa_app_core)
 
-add_executable(gsa WIN32 src/main.cpp src/app.cpp src/app_ui.cpp src/app_cards.cpp src/icons.cpp src/vk_context.cpp src/map_renderer.cpp src/text_renderer.cpp)
+add_executable(gsa WIN32 src/main.cpp src/app.cpp src/app_ui.cpp src/app_cards.cpp
+ src/app_extra.cpp src/icons.cpp src/vk_context.cpp src/map_renderer.cpp src/text_renderer.cpp)
 if(NOT WIN32)
   set_target_properties(gsa PROPERTIES WIN32_EXECUTABLE OFF)
 endif()

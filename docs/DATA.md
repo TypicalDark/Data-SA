@@ -16,7 +16,7 @@ exports.
 | `raster-relief`, `raster-fire`, ... (ten) | PMTiles, PNG | `tools/webpack/build_raster_packs.py` | the website's images as 256 px tiles |
 | `base` | PMTiles, MVT | `tools/webpack/build_base_pack.py` | road (r class 0-7, name, ref, bridge, tunnel), rail, land (c class), poi (k kind), place (r rank); the website's base map, zoom 5-9 from its overview and 10-14 from its regional tiles (about 180 MB) |
 | `buildings` | PMTiles, GSB1 tiles (gzip) | `tools/webpack/build_buildings_pack.py` | 44.2M footprints at zoom 12 in the website's GSB1 encoding (OSM, Google Open Buildings, Microsoft; about 230 MB); the app decodes them in `gsb.cpp` |
-| `find` | JSON | the website's `data/x/find.json`, copied | municipalities (outline, people, area, median value, ward winners), NTCSA free capacity, dams, airports, ports, power stations, towns; served at `/v1/data/find` |
+| `find` | JSON | the website's `data/x/find.json`, copied | municipalities (outline, people, area, median value, ward winners, Census 2011 jobs, income, education and services, solar yield), NTCSA free capacity, dams, airports, ports, power stations, towns; served at `/v1/data/find` |
 | `pack` | SQLite, `gsa-pack/1` | `export_pack.py` | tree, metric, parcel, valuation, node, edge, series, value, source, snapshot, search (FTS5), pack_info |
 
 ## Privacy (POPIA)

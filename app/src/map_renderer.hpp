@@ -3,6 +3,7 @@
 
 #include <condition_variable>
 #include <deque>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <thread>
@@ -75,6 +76,10 @@ class MapRenderer {
     double wx = 0, wy = 0;  // world position of the feature (point) or of the click
   };
   std::optional<WebHit> pick_web(double sx, double sy, const geo::Camera& cam) const;
+  // Point features of one layer in the tiles drawn last frame, with their world position. A spot can
+  // come twice (a parent tile stands in next to a loaded child), so callers dedupe.
+  void points(const std::string& pack, const std::string& layer,
+              const std::function<void(const mvt::Feature&, double wx, double wy)>& fn) const;
   size_t tile_count() const { return tiles_.size(); }
   size_t vertex_count() const { return vertices_; }
 

@@ -31,4 +31,26 @@ inline ImVec4 col(const char* h, float a = 1.0f) {
 inline ImU32 u32(const char* h, float a = 1.0f) { return ImGui::ColorConvertFloat4ToU32(col(h, a)); }
 inline ImU32 u32(style::Rgba c) { return IM_COL32(c.r, c.g, c.b, c.a); }
 
+
+// A flat outlined button like the website's .btn / chips: text centred, accent border when on.
+// (Callers that want square corners push FrameRounding themselves.)
+inline bool chip(const char* label, bool on, ImVec2 size = ImVec2(0, 0), bool enabled = true) {
+  ImGui::PushStyleColor(ImGuiCol_Border, on ? col(kAccent) : col(kLine));
+  ImGui::PushStyleColor(ImGuiCol_Text, !enabled ? col(kFaint) : on ? col(kInk) : col(kMuted));
+  ImGui::PushStyleColor(ImGuiCol_Button, on ? col(kHover) : ImVec4(0, 0, 0, 0));
+  ImGui::BeginDisabled(!enabled);
+  const bool r = ImGui::Button(label, size);
+  ImGui::EndDisabled();
+  ImGui::PopStyleColor(3);
+  return r;
+}
+
+// A small muted heading over a block of a card.
+inline void section(ImFont* f, const char* t) {
+  ImGui::Spacing();
+  ImGui::PushFont(f);
+  ImGui::TextColored(col(kMuted), "%s", t);
+  ImGui::PopFont();
+}
+
 }  // namespace gsa::ui

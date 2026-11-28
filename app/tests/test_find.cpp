@@ -80,3 +80,45 @@ TEST_CASE("rank and spot") {
   CHECK(find::fmt_num(1234567) == "1 234 567");
   CHECK(find::fmt_km(0.45) == "450 m");
 }
+
+TEST_CASE("Census measures: Find both ways, Rank, Compare") {
+  const auto& d = data();
+  const auto* jhb = d.muni("JHB");
+  const auto* ovs = d.muni("WC032");
+  REQUIRE(jhb);
+  REQUIRE(ovs);
+  CHECK(ovs->un == doctest::Approx(20.6));
+  CHECK(ovs->inc == doctest::Approx(56431));
+  CHECK(ovs->pv == doctest::Approx(1613));
+  // both directions of every Census measure
+  REQUIRE(find::def("unMin"));
+  REQUIRE(find::def("unMax"));
+  REQUIRE(find::def("watMax"));
+  CHECK(find::def("pvMax") == nullptr);
+  auto r = find::make("unMax");
+  r.v = 25;
+  CHECK(find::pass(d, *ovs, r));
+  r.v = 15;
+  CHECK(!find::pass(d, *ovs, r));
+  CHECK(find::text(r) == "Unemployment rate, at most 15%");
+  CHECK(find::why(d, *ovs, {r}) == "unemployment rate 20.6%");
+  auto inc = find::make("incMin");
+  inc.v = 50000;
+  CHECK(find::text(inc) == "Median household income, at least R50 000/yr");
+  CHECK(find::pass(d, *ovs, inc));
+  CHECK(find::preset("Skilled"));
+  // ranking by a Census measure
+  const double all[4] = {16, -35, 33, -22};
+  auto rows = find::rank(d, "mun", all);
+  REQUIRE(rows.size() > 200);
+  CHECK(rows.front().x >= rows.back().x);
+  CHECK(rows.front().value.back() == '%');
+  // Compare marks highs and lows
+  auto cmp = find::compare({jhb, ovs});
+  REQUIRE(cmp.size() >= 12);
+  CHECK(cmp[0].label == "People");
+  CHECK(cmp[0].hi == 0);
+  CHECK(cmp[0].lo == 1);
+  const std::string csv = find::compare_csv({jhb, ovs});
+  CHECK(csv.rfind("measure,City of Johannesburg,Overstrand\n", 0) == 0);
+}

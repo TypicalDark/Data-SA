@@ -57,6 +57,7 @@ struct State {
   std::set<std::string> hidden;
   std::string focus;
   bool names = true, roads = true, terrain = true, buildings = false, landmarks = true;
+  bool operator==(const State&) const = default;
 
   bool shows(const std::string& id) const;  // on and not hidden
   void add(const std::string& id);          // to the top; a choropleth replaces the other one

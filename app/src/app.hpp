@@ -4,6 +4,8 @@
 #pragma once
 
 #include <chrono>
+#include <deque>
+#include <functional>
 #include <future>
 #include <map>
 #include <memory>
@@ -41,7 +43,7 @@ struct AppOptions {
   std::string topic;           // start topic: start grid vote water prop land places move nature risk (or old names)
   std::string select;          // area id to open, for example WC053
   std::string panel;           // rail panel to open: find rank list areas views watch keys
-  std::string command;         // a command line to run at start, for example "apollo DES"
+  std::string command;         // command lines to run at start, separated by ";" ("apollo DES; KEEP")
   std::optional<double> lon, lat, zoom;
   std::optional<double> pitch;  // tilt in degrees (3D), 0 to 60
   std::optional<std::pair<double, double>> spot;  // right-click spot to open (lon, lat)
@@ -57,13 +59,13 @@ class App {
 
  private:
   struct Card {
-    enum Kind { Home, Area, Facility, Spot } kind = Home;
+    enum Kind { Home, Area, Facility, Spot, Near } kind = Home;  // Near: props km, label
     std::string id;           // area id, or facility id
     nlohmann::json props;     // facility properties
     double lon = 0, lat = 0;  // facility or spot position
     int tab = 0;
   };
-  enum class Panel { None, Find, List, Areas, Views, Watch, Keys, Measure, Filter, Layers, Live, Reach, Analyse };
+  enum class Panel { None, Find, List, Areas, Views, Watch, Keys, Measure, Filter, Layers, Live, Reach, Analyse, History };
   struct Row {  // one row of a list or ranking
     std::string name, value, sub;
     double x = 0;     // sort key / bar
@@ -132,6 +134,64 @@ class App {
   void save_view(const std::string& name);
   bool load_view(const std::string& name);
   void watch_current();
+
+  // ---- website v70+ functions (app_extra.cpp)
+  // KEEP: up to two cards stay open above the live card
+  struct Kept {
+    Card card;
+    std::string title, kind;
+    bool open = true;
+  };
+  std::vector<Kept> kept_;
+  bool in_kept_ = false;  // drawing a kept card: no close button or function strip
+  void keep_current();
+  bool is_kept(const Card& c) const;
+  void ui_kept();
+  // Compare: up to four municipalities side by side
+  std::vector<std::string> cmp_;
+  void cmp_add(const std::string& code);
+  void ui_compare();
+  std::string current_muni_code() const;  // the open municipality card's code, or ""
+  // undo / redo over layers, filters, Find conditions, Compare and kept cards
+  struct Snap {
+    layers::State l;
+    layers::Filters f;
+    std::vector<find::Rule> rules;
+    std::vector<std::string> cmp;
+    std::vector<std::string> kept;  // titles only: kept cards are restored by title from `kept_all`
+    std::string label;
+    double t = 0;
+  };
+  std::vector<Snap> undo_, redo_;
+  std::optional<Snap> last_snap_;
+  std::vector<Kept> kept_all_;  // every card kept this session, for undo
+  Snap snap_now() const;
+  void track_changes();
+  void restore(const Snap& s);
+  void undo();
+  void redo();
+  void ui_panel_history();
+  // one strip of every active filter, over the map
+  void ui_filter_strip();
+  // REPORT: an HTML page of the open card with the map, in the Documents folder
+  void report();
+  void report_now();
+  bool report_ready() const;
+  bool report_pending_ = false;
+  std::function<void(const std::vector<uint8_t>&, uint32_t, uint32_t)> on_png_;
+  // CHK / NEAR: the everyday answers around a point
+  void ui_near(Card& c);
+  void open_near(double lon, double lat, double km, const std::string& label);
+  float side_w() const;  // the docked panel's width (wider while Compare shows 3 or 4 places)
+  // HELP CODE
+  std::string help_code_;
+  // search that understands tasks ("unemployment", "dam levels", "compare")
+  struct Task {
+    std::string label, command, why;
+  };
+  std::vector<Task> tasks_for(const std::string& q) const;
+  // card strip: the functions that fit, the rest under More
+  std::vector<std::string> card_lines(const Card& c);  // facts of a card as "label: value" (REPORT)
   void save_settings();
   void fly_to_bbox(double lon0, double lat0, double lon1, double lat1, double max_zoom = 11);
   void fly_to(double lon, double lat, double zoom);
@@ -176,7 +236,7 @@ class App {
   std::set<std::string> avail_;
   bool side_open_ = true;
   Panel panel_ = Panel::None;
-  bool find_rank_ = false;  // Find panel tab
+  int find_tab_ = 0;  // Find panel tab: 0 Find, 1 Rank, 2 Compare
   // Find and Rank (find.hpp) over the Find data pack
   std::optional<find::Data> fdata_;
   JsonFuture fdata_req_;
@@ -232,6 +292,7 @@ class App {
     int slow = 0;
   } prof_;
   std::vector<TileKey> last_need_;
+  std::deque<std::string> script_;  // --command steps still to run
   std::string fly_on_load_;
   bool want_png_ = false;
 };

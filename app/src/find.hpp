@@ -20,6 +20,8 @@ struct Muni {
   std::vector<std::array<double, 2>> ring;  // lon, lat
   double bb[4] = {0, 0, 0, 0};              // lon0, lat0, lon1, lat1
   double pop = -1, km2 = -1, dens = -1, med = -1, nv = -1;
+  // Census 2011 (weighted by 2022 ward population), solar yield and Green Drop; -1 = no figure
+  double un = -1, inc = -1, mat = -1, net = -1, inf = -1, elec = -1, wat = -1, car = -1, pv = -1, wsa = -1;
   std::string win;  // party that won most wards
   int win_wards = 0, wards = 0;
   bool contains(double lon, double lat) const;
@@ -87,6 +89,30 @@ std::set<std::string> run(const Data& d, const std::vector<Rule>& rules);
 std::string text(const Rule& r);
 // Why a municipality matched: one part per rule ("12 km to Apollo · R650 000").
 std::string why(const Data& d, const Muni& m, const std::vector<Rule>& rules);
+
+// The measures a municipality carries (Find both ways, Rank, Compare, colour): key, label, unit.
+struct Measure {
+  const char* key;    // un, inc, mat, net, inf, elec, wat, car, pv, wsa, pop, dens, med
+  const char* group;  // Find group
+  const char* label;  // "Unemployment rate"
+  const char* unit;   // %, R a year, kWh/kWp, people, /km2, R
+  double Muni::*field;
+  double def_min, def_max;  // starting values for "at least" and "at most"
+  bool census;               // Census 2011
+};
+const std::vector<Measure>& measures();
+const Measure* measure(const std::string& key);
+// "20.6%", "R56 431/yr", "1 613 kWh/kWp", or "–" when there is no figure
+std::string fmt_measure(const Measure& m, double v);
+
+// Compare: up to four municipalities side by side, one row per measure.
+struct CompareRow {
+  std::string label;
+  std::vector<std::string> cells;
+  int hi = -1, lo = -1;  // columns with the highest and lowest figure (-1 when fewer than 2 figures)
+};
+std::vector<CompareRow> compare(const std::vector<const Muni*>& ms);
+std::string compare_csv(const std::vector<const Muni*>& ms);
 
 // Rank what's in view.
 struct RankDef {

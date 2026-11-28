@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <map>
 
 #include "style.hpp"
 
@@ -133,6 +134,8 @@ Data parse(const json& j) {
     u.med = num(m, "med");
     u.nv = num(m, "nv");
     if (u.pop >= 0 && u.km2 > 0) u.dens = u.pop / u.km2;
+    for (const auto& ms : measures())
+      if (ms.census || std::string(ms.key) == "pv" || std::string(ms.key) == "wsa") u.*ms.field = num(m, ms.key);
     if (m.contains("win") && m["win"].is_array() && m["win"].size() >= 3) {
       u.win = str(m["win"], 0);
       u.win_wards = int(at(m["win"], 1, 0));
@@ -188,8 +191,98 @@ std::vector<Rule> rules_from(const json& j) {
   return out;
 }
 
+const std::vector<Measure>& measures() {
+  static const std::vector<Measure> m = {
+      {"pop", "People", "People", "people", &Muni::pop, 100000, 50000, false},
+      {"dens", "People", "People per km\xc2\xb2", "/km\xc2\xb2", &Muni::dens, 100, 50, false},
+      {"med", "Property", "Median property value", "R", &Muni::med, 1000000, 800000, false},
+      {"un", "Jobs and income", "Unemployment rate", "%", &Muni::un, 40, 25, true},
+      {"inc", "Jobs and income", "Median household income", "R a year", &Muni::inc, 40000, 30000, true},
+      {"mat", "Education", "Adults with matric or more", "%", &Muni::mat, 40, 30, true},
+      {"net", "Services", "Homes with internet", "%", &Muni::net, 10, 5, true},
+      {"elec", "Services", "Homes with electric lighting", "%", &Muni::elec, 90, 80, true},
+      {"inf", "Services", "Homes in informal dwellings", "%", &Muni::inf, 20, 10, true},
+      {"wat", "Services", "Homes with piped water inside", "%", &Muni::wat, 60, 40, true},
+      {"car", "Services", "Homes with a car", "%", &Muni::car, 40, 20, true},
+      {"pv", "Power", "Solar yield", "kWh/kWp", &Muni::pv, 1700, 1600, false},
+      {"wsa", "Water", "Green Drop wastewater score", "%", &Muni::wsa, 50, 30, false},
+  };
+  return m;
+}
+
+const Measure* measure(const std::string& key) {
+  for (const auto& m : measures())
+    if (key == m.key) return &m;
+  return nullptr;
+}
+
+std::string fmt_measure(const Measure& m, double v) {
+  if (v < 0 || !std::isfinite(v)) return "\xe2\x80\x93";
+  const std::string u = m.unit;
+  if (u == "%") {
+    char b[24];
+    std::snprintf(b, sizeof b, "%.1f%%", v);
+    std::string s = b;
+    if (s.size() > 3 && s.compare(s.size() - 3, 3, ".0%") == 0) s.erase(s.size() - 3, 2);
+    return s;
+  }
+  if (u == "R") return "R" + fmt_num(v);
+  if (u == "R a year") return "R" + fmt_num(v) + "/yr";
+  if (u == "people") return fmt_num(v);
+  return fmt_num(v) + " " + u;
+}
+
+std::vector<CompareRow> compare(const std::vector<const Muni*>& ms) {
+  std::vector<CompareRow> out;
+  auto row = [&](const std::string& label, auto value, auto text) {
+    CompareRow r;
+    r.label = label;
+    double hi = -1e300, lo = 1e300;
+    int n = 0;
+    for (size_t i = 0; i < ms.size(); ++i) {
+      r.cells.push_back(text(*ms[i]));
+      const double v = value(*ms[i]);
+      if (v < 0) continue;
+      ++n;
+      if (v > hi) hi = v, r.hi = int(i);
+      if (v < lo) lo = v, r.lo = int(i);
+    }
+    if (n < 2 || hi == lo) r.hi = r.lo = -1;
+    out.push_back(std::move(r));
+  };
+  for (const auto& m : measures()) {
+    if (std::string(m.key) == "wsa") continue;  // not in the national file yet
+    row(m.label, [&](const Muni& u) { return u.*m.field; },
+        [&](const Muni& u) { return fmt_measure(m, u.*m.field); });
+    if (std::string(m.key) == "med")
+      row("Most wards won", [](const Muni&) { return -1.0; }, [](const Muni& u) {
+        return u.win.empty() ? std::string("\xe2\x80\x93") : u.win + " " + std::to_string(u.win_wards) + "/" + std::to_string(u.wards);
+      });
+  }
+  return out;
+}
+
+std::string compare_csv(const std::vector<const Muni*>& ms) {
+  auto q = [](const std::string& v) {
+    if (v.find_first_of("\",") == std::string::npos) return v;
+    std::string o = "\"";
+    for (char ch : v) o += ch == '"' ? std::string("\"\"") : std::string(1, ch);
+    return o + "\"";
+  };
+  std::string s = "measure";
+  for (const auto* m : ms) s += "," + q(m->name);
+  s += "\n";
+  for (const auto& r : compare(ms)) {
+    s += q(r.label);
+    for (const auto& c : r.cells) s += "," + q(c == "\xe2\x80\x93" ? "" : c);
+    s += "\n";
+  }
+  return s;
+}
+
 const std::vector<Def>& defs() {
-  static const std::vector<Def> d = {
+  static const std::vector<Def> d = [] {
+    std::vector<Def> v = {
       {"densMin", "People", "People per km\xc2\xb2, at least", {{"v", 100, "/km\xc2\xb2"}}},
       {"densMax", "People", "People per km\xc2\xb2, at most", {{"v", 50, "/km\xc2\xb2"}}},
       {"popMin", "People", "People living there, at least", {{"v", 100000, "people"}}},
@@ -202,8 +295,34 @@ const std::vector<Def>& defs() {
       {"nearSt", "Power", "Within km of a power station", {{"km", 30, "km"}}},
       {"nearAir", "Transport", "Within km of an airport", {{"km", 60, "km"}}},
       {"nearPort", "Transport", "Within km of a port", {{"km", 150, "km"}}},
-  };
+    };
+    // every Census measure, solar yield and Green Drop both ways ("unMin", "unMax", ...)
+    static std::vector<std::string> labels;  // Def holds const char*
+    labels.reserve(64);
+    for (const auto& m : measures()) {
+      const std::string k = m.key;
+      if (k == "pop" || k == "dens" || k == "med") continue;
+      for (int hi = 0; hi < 2; ++hi) {
+        if ((k == "pv" || k == "wsa") && hi) continue;  // only "at least" makes sense
+        labels.push_back(k + (hi ? "Max" : "Min"));
+        const char* key = labels.back().c_str();
+        labels.push_back(std::string(m.label) + (hi ? ", at most" : ", at least"));
+        v.push_back({key, m.group, labels.back().c_str(), {{"v", hi ? m.def_max : m.def_min, m.unit}}});
+      }
+    }
+    return v;
+  }();
   return d;
+}
+
+// "unMin" -> (measure un, at least)
+static std::pair<const Measure*, bool> measure_rule(const std::string& k) {
+  if (k.size() < 4) return {nullptr, false};
+  const std::string tail = k.substr(k.size() - 3), key = k.substr(0, k.size() - 3);
+  if (tail != "Min" && tail != "Max") return {nullptr, false};
+  const Measure* m = measure(key);
+  if (!m || (!m->census && key != "pv" && key != "wsa")) return {nullptr, false};
+  return {m, tail == "Max"};
 }
 
 const Def* def(const std::string& k) {
@@ -249,6 +368,10 @@ const std::vector<Preset>& presets() {
       {"Warehouse near a port", {R("nearPort", 120), R("nearTown", 20)}},
       {"Affordable, busy towns", {R("valMax", 600000), R("densMin", 100)}},
       {"Water-secure areas", {R("nearDam", 30, 75)}},
+      {"Remote-work town", {R("netMin", 12), R("nearAir", 80), R("valMax", 1500000)}},
+      {"Solar with grid room", {R("pvMin", 1800), R("nearCap", 40, 50)}},
+      {"Skilled, working towns", {R("matMin", 40), R("unMax", 30)}},
+      {"Service backlog", {R("infMin", 20), R("watMax", 40)}},
   };
   return p;
 }
@@ -305,6 +428,10 @@ bool pass(const Data& d, const Muni& m, const Rule& r) {
   if (r.k == "valMax") return m.med > 0 && m.med <= r.v;
   if (r.k == "valMin") return m.med > 0 && m.med >= r.v;
   if (r.k == "party") return !m.win.empty() && m.win == r.p;
+  if (auto [ms, at_most] = measure_rule(r.k); ms) {
+    const double v = m.*ms->field;
+    return v >= 0 && (at_most ? v <= r.v : v >= r.v);
+  }
   if (!def(r.k)) return true;
   const auto [o, dist] = nearest(d, m, r);
   return o && dist <= r.km;
@@ -329,6 +456,7 @@ std::string text(const Rule& r) {
   if (r.k == "party") return "Most wards won by " + r.p;
   const Def* d = def(r.k);
   if (!d) return r.k;
+  if (auto [ms, at_most] = measure_rule(r.k); ms) return std::string(d->label) + " " + fmt_measure(*ms, r.v);
   const std::string unit = d->fields[0].unit;
   if (unit == "R") return std::string(d->label) + " R" + fmt_num(r.v);
   return std::string(d->label) + " " + fmt_num(r.v) + (unit == "people" ? "" : " " + unit);
@@ -341,7 +469,11 @@ std::string why(const Data& d, const Muni& m, const std::vector<Rule>& rules) {
     if (r.k == "densMin" || r.k == "densMax") part = m.dens >= 0 ? fmt_num(m.dens) + " /km\xc2\xb2" : "no figure";
     else if (r.k == "popMin") part = fmt_num(m.pop) + " people";
     else if (r.k == "valMin" || r.k == "valMax") part = m.med > 0 ? "R" + fmt_num(m.med) : "no roll data";
-    else if (r.k == "party")
+    else if (auto [ms, at_most] = measure_rule(r.k); ms) {
+      std::string l = ms->label;
+      l[0] = char(std::tolower(static_cast<unsigned char>(l[0])));
+      part = m.*ms->field >= 0 ? l + " " + fmt_measure(*ms, m.*ms->field) : "no figure";
+    } else if (r.k == "party")
       part = m.win.empty() ? "no result" : m.win + " " + std::to_string(m.win_wards) + "/" + std::to_string(m.wards);
     else {
       const auto [o, dist] = nearest(d, m, r);
@@ -361,6 +493,12 @@ const std::vector<RankDef>& rank_defs() {
       {"dams", "Dams, lowest first", true, true},
       {"mval", "Municipalities, by median value", true, false},
       {"mpop", "Municipalities, by people", true, false},
+      {"mun", "Municipalities, by unemployment (Census 2011)", true, false},
+      {"minc", "Municipalities, by household income (Census 2011)", true, false},
+      {"mmat", "Municipalities, by adults with matric (Census 2011)", true, false},
+      {"mnet", "Municipalities, by homes with internet (Census 2011)", true, false},
+      {"minf", "Municipalities, by informal dwellings (Census 2011)", true, false},
+      {"mpv", "Municipalities, by solar yield", true, false},
       {"air", "Airports", true, false},
   };
   return r;
@@ -405,6 +543,26 @@ std::vector<RankRow> rank(const Data& d, const std::string& k, const double b[4]
       }
       rows.push_back(r);
     }
+  } else if (k.size() > 1 && k[0] == 'm' && measure(k.substr(1)) && k != "mpop") {
+    const Measure& ms = *measure(k.substr(1));
+    static const std::map<std::string, const char*> colours = {{"un", "#e0602a"}, {"inc", "#2aa36b"}, {"mat", "#8a7cf0"},
+                                                               {"net", "#35d0f0"}, {"inf", "#c9a20a"}, {"pv", "#e2a400"}};
+    const auto ci = colours.find(ms.key);
+    for (const auto& m : d.munis) {
+      if (m.bb[2] < b[0] || m.bb[0] > b[2] || m.bb[3] < b[1] || m.bb[1] > b[3]) continue;
+      const double v = m.*ms.field;
+      if (v < 0) continue;
+      RankRow r;
+      r.name = m.name;
+      r.area = m.code;
+      r.lon = (m.bb[0] + m.bb[2]) / 2;
+      r.lat = (m.bb[1] + m.bb[3]) / 2;
+      r.x = v;
+      r.value = fmt_measure(ms, v);
+      r.sub = m.prov + " \xc2\xb7 " + fmt_num(m.pop) + " people";
+      r.colour = c(ci != colours.end() ? ci->second : "#9fb3c8");
+      rows.push_back(r);
+    }
   } else if (k == "air") {
     for (const auto& o : d.air) {
       if (!in_bounds(o.lon, o.lat, b)) continue;
@@ -443,8 +601,10 @@ std::vector<std::pair<std::string, std::string>> spot(const Data& d, double lon,
   if (auto [o, km] = near(d.places, nullptr); o) L.emplace_back("Nearest town", o->name + " \xc2\xb7 " + fmt_km(km));
   if (auto [o, km] = near(d.dams, nullptr); o)
     L.emplace_back("Nearest dam", o->name + " \xc2\xb7 " + fmt_num(o->a) + "% full \xc2\xb7 " + fmt_km(km));
-  if (auto [o, km] = near(d.cap, [](const Site& s) { return s.a > 0; }); o)
+  if (auto [o, km] = near(d.cap, [](const Site& s) { return s.a > 0; }); o && km <= 150)
     L.emplace_back("Grid capacity", o->name + " has " + fmt_num(o->a) + " MW free \xc2\xb7 " + fmt_km(km));
+  else if (!d.cap.empty())
+    L.emplace_back("Grid capacity", "No substation with free capacity within 150 km (NTCSA 2025)");
   if (auto [o, km] = near(d.air, nullptr); o)
     L.emplace_back("Nearest airport", o->name + (o->t.empty() ? "" : " (" + o->t + ")") + " \xc2\xb7 " + fmt_km(km));
   if (auto [o, km] = near(d.ports, nullptr); o && km < 300) L.emplace_back("Nearest port", o->name + " \xc2\xb7 " + fmt_km(km));

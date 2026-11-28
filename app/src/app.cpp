@@ -125,6 +125,28 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
       }
     }
     rank_key_ = sd.value("rank", rank_key_);
+    try {
+      cmp_ = sd.value("cmp", std::vector<std::string>{});
+      if (cmp_.size() > 4) cmp_.resize(4);
+      for (const auto& k : sd.value("kept", json::array())) {
+        Kept x;
+        x.card.kind = Card::Kind(std::clamp(k.value("kind", 0), 0, int(Card::Near)));
+        x.card.id = k.value("id", "");
+        x.card.lon = k.value("lon", 0.0);
+        x.card.lat = k.value("lat", 0.0);
+        x.card.props = k.value("props", json::object());
+        x.title = k.value("title", "");
+        x.kind = k.value("kd", "");
+        x.open = k.value("open", true);
+        if (x.card.kind == Card::Home || kept_.size() >= 2) continue;
+        if (x.card.kind == Card::Area) area_data(x.card.id);
+        kept_.push_back(x);
+        kept_all_.push_back(x);
+      }
+    } catch (const std::exception&) {
+      cmp_.clear();
+      kept_.clear();
+    }
   }
   if (opt_.screenshot.empty() && sd.contains("topic")) set_topic(sd.value("topic", "start"));
   else set_topic(opt_.topic.empty() ? "start" : topic_id(opt_.topic));
@@ -158,9 +180,13 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
   if (!opt_.panel.empty()) {
     const std::string p = opt_.panel;
     if (p == "rank") {
-      find_rank_ = true;
+      find_tab_ = 1;
       open_panel(Panel::Find);
-    } else if (p == "find") open_panel(Panel::Find);
+    } else if (p == "cmp") {
+      find_tab_ = 2;
+      open_panel(Panel::Find);
+    } else if (p == "hist") open_panel(Panel::History);
+    else if (p == "find") open_panel(Panel::Find);
     else if (p == "list") open_panel(Panel::List);
     else if (p == "filter") open_panel(Panel::Filter);
     else if (p == "areas") open_panel(Panel::Areas);
@@ -169,7 +195,14 @@ App::App(AppOptions opt) : opt_(std::move(opt)) {
     else if (p == "keys") open_panel(Panel::Keys);
     else if (p == "catalogue") catalogue_open_ = true;
   }
-  if (!opt_.command.empty()) run_command(opt_.command);
+  // a scripted run: commands separated by ";" run one per frame once the map is up
+  for (size_t a = 0; a <= opt_.command.size();) {
+    size_t b = opt_.command.find(';', a);
+    if (b == std::string::npos) b = opt_.command.size();
+    const std::string c = opt_.command.substr(a, b - a);
+    if (c.find_first_not_of(' ') != std::string::npos) script_.push_back(c.substr(c.find_first_not_of(' ')));
+    a = b + 1;
+  }
 }
 
 App::~App() {
@@ -317,6 +350,11 @@ void App::frame() {
 
   const double f0 = now_s();
   if (prof_.t_start == 0) prof_.t_start = f0;
+  if (!script_.empty() && frames_ >= 2 && !fly_ && pending_fn_.empty()) {
+    run_command(script_.front());
+    script_.pop_front();
+  }
+  if (report_pending_ && report_ready()) report_now();
   for (auto& t : loader_->take()) map_->add(t);
   const double f1 = now_s();
   auto need = map_->needed(cam_, packs_);
@@ -334,6 +372,7 @@ void App::frame() {
   handle_input();
   blockers_.clear();
   ui();
+  track_changes();
   ImGui::Render();
 
   // labels go where the interface left room; screenshots skip the fades
@@ -360,10 +399,10 @@ void App::frame() {
     dpr = ww ? float(fw) / float(ww) : 1.0f;
   }
   map_->draw(vk_->cmd(), cam_, dpr);
-  ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vk_->cmd());
+  if (!(want_png_ && on_png_)) ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vk_->cmd());  // reports: map only
 
   // scripted screenshot: wait until no tiles are missing or in flight and areas have loaded
-  const bool idle = map_->needed(cam_, packs_).empty() && loader_->in_flight() == 0 && !map_->meshing() && area_req_.empty() && !fly_ &&
+  const bool idle = script_.empty() && !report_pending_ && !want_png_ && map_->needed(cam_, packs_).empty() && loader_->in_flight() == 0 && !map_->meshing() && area_req_.empty() && !fly_ &&
                     !map_->labels_animating() && !search_req_.valid() && pending_fn_.empty();
   settled_frames_ = idle ? settled_frames_ + 1 : 0;
   if (idle && prof_.t_settled == 0) prof_.t_settled = now_s();
@@ -374,6 +413,13 @@ void App::frame() {
     vk_->end_frame(&px);
     const auto e = vk_->extent();
     for (size_t i = 3; i < px.size(); i += 4) px[i] = 255;
+    if (!shoot && on_png_) {
+      auto cb = std::move(on_png_);
+      on_png_ = nullptr;
+      want_png_ = false;
+      cb(px, e.width, e.height);
+      return;
+    }
     std::string out = opt_.screenshot;
     if (!shoot) {
       // PNG command: a dated file in the user's Pictures (or home) folder
@@ -673,13 +719,17 @@ void App::close_top() {
   if (cards_.size() > 1) cards_.pop_back();
 }
 
-float App::side_width() const { return kRailW + (side_open_ ? kSideW : 0.0f); }
+float App::side_w() const {
+  return panel_ == Panel::Find && find_tab_ == 2 && cmp_.size() >= 3 && cam_.w >= 1100 ? 560.0f : kSideW;
+}
+float App::side_width() const { return kRailW + (side_open_ ? side_w() : 0.0f); }
 
 void App::fly_to(double lon, double lat, double zoom) {
   // centre the target in the part of the window the sidebar leaves free
   geo::Camera to = cam_;
   to.zoom = zoom;
   const double off = side_width() / 2 / to.scale();
+  fly_on_load_.clear();  // a newer fly wins over an area card's fly once its outline loads
   fly_ = Fly{now_s(), 0.7, cam_, geo::mx(lon) - off, geo::my(lat), zoom};
 }
 
@@ -697,7 +747,7 @@ void App::toast(const std::string& s, double secs) {
 
 bool App::subject_pos(double& lon, double& lat) const {
   const Card& c = cards_.back();
-  if (c.kind == Card::Facility || c.kind == Card::Spot) {
+  if (c.kind == Card::Facility || c.kind == Card::Spot || c.kind == Card::Near) {
     lon = c.lon;
     lat = c.lat;
     return true;
@@ -710,6 +760,13 @@ bool App::subject_pos(double& lon, double& lat) const {
       lat = (b[1].get<double>() + b[3].get<double>()) / 2;
       return true;
     }
+    // not loaded yet: the Find data has every municipality's outline
+    if (fdata_)
+      if (const auto* m = fdata_->muni(c.id)) {
+        lon = (m->bb[0] + m->bb[2]) / 2;
+        lat = (m->bb[1] + m->bb[3]) / 2;
+        return true;
+      }
   }
   return false;
 }
@@ -719,9 +776,16 @@ std::string App::subject_name() const {
   if (c.kind == Card::Facility) return c.props.value("name", c.id);
   if (c.kind == Card::Area) {
     auto it = areas_.find(c.id);
-    return it != areas_.end() ? it->second.value("name", c.id) : c.id;
+    if (it != areas_.end() && it->second.contains("name")) return it->second.value("name", c.id);
+    if (fdata_)
+      if (const auto* m = fdata_->muni(c.id)) return m->name;
+    return c.id;
   }
-  if (c.kind == Card::Spot) return "this spot";
+  if (c.kind == Card::Spot) {
+    const std::string m = muni_name_at(geo::mx(c.lon), geo::my(c.lat));
+    return m.empty() ? "this spot" : "a spot in " + m;
+  }
+  if (c.kind == Card::Near) return c.props.value("label", std::string("this spot"));
   return "South Africa";
 }
 
@@ -768,7 +832,7 @@ void App::save_view(const std::string& name) {
   if (cards_.back().kind == Card::Area) e["area"] = cards_.back().id;
   // views keep the Find conditions and the Find / Rank tab, as on the website
   if (!rules_.empty()) e["find"] = find::to_json(rules_);
-  e["find_tab"] = find_rank_ ? "rank" : "find";
+  e["find_tab"] = find_tab_ == 1 ? "rank" : find_tab_ == 2 ? "cmp" : "find";
   e["rank"] = rank_key_;
   for (auto& x : v)
     if (x.value("name", "") == n) {
@@ -795,7 +859,10 @@ bool App::load_view(const std::string& name) {
     lstate_.hidden = std::set<std::string>(h.begin(), h.end());
     lstate_.focus = e.value("focus", "");
     set_rules(find::rules_from(e.value("find", json::array())));
-    find_rank_ = e.value("find_tab", "find") == "rank";
+    {
+      const std::string ft = e.value("find_tab", "find");
+      find_tab_ = ft == "rank" ? 1 : ft == "cmp" ? 2 : 0;
+    }
     rank_key_ = e.value("rank", rank_key_);
     apply_layers();
     fly_ = Fly{now_s(), 0.7, cam_, geo::mx(e.value("lon", 25.2)), geo::my(e.value("lat", -28.8)), e.value("zoom", 5.4)};
@@ -812,6 +879,14 @@ void App::save_settings() {
   auto& d = settings_->data();
   d["side_open"] = side_open_;
   d["topic"] = lstate_.topic;
+  d["cmp"] = cmp_;
+  {
+    json k = json::array();
+    for (const auto& x : kept_)
+      k.push_back({{"kind", int(x.card.kind)}, {"id", x.card.id}, {"lon", x.card.lon}, {"lat", x.card.lat},
+                   {"props", x.card.props}, {"title", x.title}, {"kd", x.kind}, {"open", x.open}});
+    d["kept"] = k;
+  }
   d["base"] = json{{"roads", lstate_.roads}, {"terrain", lstate_.terrain}, {"names", lstate_.names},
                    {"buildings", lstate_.buildings}, {"landmarks", lstate_.landmarks}};
   settings_->save();
@@ -841,12 +916,30 @@ void App::run_fn(const std::string& code) {
       lon = geo::lon_of(cam_.cx);
       lat = geo::lat_of(cam_.cy);
     }
-    // 25 km around the subject: fly so the circle fills the view, then rank what is in it
-    const double dlat = 25.0 / 111.0, dlon = dlat / std::cos(lat * geo::kPi / 180);
-    fly_to_bbox(lon - dlon, lat - dlat, lon + dlon, lat + dlat, 12);
-    find_rank_ = true;
+    std::string label = subject_name();
+    if (cards_.back().kind == Card::Home || label.empty()) label = "Map centre";
+    label[0] = char(std::toupper(static_cast<unsigned char>(label[0])));
+    open_near(lon, lat, 25, label);
+  } else if (code == "CHK") {
+    if (!has_pos) {
+      lon = geo::lon_of(cam_.cx);
+      lat = geo::lat_of(cam_.cy);
+    }
+    open_spot(lon, lat);
+    fly_to(lon, lat, std::max(cam_.zoom, 12.0));
+  } else if (code == "KEEP") {
+    keep_current();
+  } else if (code == "CMP") {
+    const std::string m = current_muni_code();
+    if (!m.empty()) cmp_add(m);
+    find_tab_ = 2;
     panel_ = Panel::Find;
-    toast("Ranking everything within about 25 km of " + subject_name());
+    side_open_ = true;
+  } else if (code == "REPORT") {
+    report();
+  } else if (code == "HIST") {
+    panel_ = Panel::History;
+    side_open_ = true;
   } else if (code == "MEAS") {
     measuring_ = true;
     panel_ = Panel::Measure;
@@ -927,7 +1020,7 @@ bool App::run_command(const std::string& line) {
   } else if (c == "START" || c == "GRID" || c == "VOTE" || c == "WATER" || c == "PLOTS") {
     set_topic(c == "PLOTS" ? "prop" : topic_id(c));
   } else if (c == "FIND") {
-    find_rank_ = false;
+    find_tab_ = 0;
     panel_ = Panel::Find;
     side_open_ = true;
     if (const auto* pre = find::preset(a)) {
@@ -948,7 +1041,7 @@ bool App::run_command(const std::string& line) {
           break;
         }
       }
-    find_rank_ = true;
+    find_tab_ = 1;
     panel_ = Panel::Find;
     side_open_ = true;
   } else if (c == "FILTER") {
@@ -974,8 +1067,21 @@ bool App::run_command(const std::string& line) {
   } else if (c == "X") {
     close_top();
   } else if (c == "HELP") {
+    help_code_ = a;
+    std::transform(help_code_.begin(), help_code_.end(), help_code_.begin(), ::toupper);
     panel_ = Panel::Keys;
     side_open_ = true;
+  } else if (c == "NEAR" && !a.empty()) {
+    double lon = 0, lat = 0;
+    if (!subject_pos(lon, lat)) lon = geo::lon_of(cam_.cx), lat = geo::lat_of(cam_.cy);
+    double km = 25;
+    try {
+      km = std::clamp(std::stod(a), 1.0, 200.0);
+    } catch (...) {
+    }
+    std::string label = subject_name();
+    label[0] = char(std::toupper(static_cast<unsigned char>(label[0])));
+    open_near(lon, lat, km, cards_.back().kind == Card::Home ? "Map centre" : label);
   } else {
     run_fn(c);
   }
@@ -1058,8 +1164,21 @@ void App::handle_input() {
     }
   }
 
+  // undo and redo work everywhere except while typing
+  if (!io.WantTextInput && io.KeyCtrl) {
+    if (ImGui::IsKeyPressed(ImGuiKey_Z, false)) io.KeyShift ? redo() : undo();
+    if (ImGui::IsKeyPressed(ImGuiKey_Y, false)) redo();
+  }
   if (!io.WantTextInput) {
     const bool shift = io.KeyShift;
+    if (shift && !io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false)) {
+      // Shift F clears every filter (undo brings them back)
+      set_rules({});
+      layers::Filters f;
+      f.hide = filter_.hide;
+      set_filter(f);
+      toast("Every filter cleared \xc2\xb7 Ctrl Z brings them back");
+    }
     static const ImGuiKey digits[] = {ImGuiKey_1, ImGuiKey_2, ImGuiKey_3, ImGuiKey_4, ImGuiKey_5,
                                       ImGuiKey_6, ImGuiKey_7, ImGuiKey_8, ImGuiKey_9, ImGuiKey_0};
     const auto& tps = layers::topics();
@@ -1072,7 +1191,7 @@ void App::handle_input() {
     if (ImGui::IsKeyPressed(ImGuiKey_Slash, false) && shift) open_panel(Panel::Keys);  // "?"
     if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket, false)) side_open_ = !side_open_;
     if (ImGui::IsKeyPressed(ImGuiKey_N, false)) {
-      find_rank_ = shift;
+      find_tab_ = shift ? 1 : 0;
       panel_ = Panel::Find;
       side_open_ = true;
     }

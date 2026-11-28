@@ -4,6 +4,7 @@
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
+#include <map>
 
 #include <GLFW/glfw3.h>
 #include <imgui.h>
@@ -75,24 +76,6 @@ std::string prop_text(const json& v) {
   return v.dump();
 }
 
-void section(ImFont* f, const char* t) {
-  ImGui::Spacing();
-  ImGui::PushFont(f);
-  ImGui::TextColored(col(kMuted), "%s", t);
-  ImGui::PopFont();
-}
-
-bool chip(const char* label, bool on, ImVec2 size = ImVec2(0, 0), bool enabled = true) {
-  ImGui::PushStyleColor(ImGuiCol_Border, on ? col(kAccent) : col(kLine));
-  ImGui::PushStyleColor(ImGuiCol_Text, !enabled ? col(kFaint) : on ? col(kInk) : col(kMuted));
-  ImGui::PushStyleColor(ImGuiCol_Button, on ? col(kHover) : ImVec4(0, 0, 0, 0));
-  ImGui::BeginDisabled(!enabled);
-  const bool r = ImGui::Button(label, size);
-  ImGui::EndDisabled();
-  ImGui::PopStyleColor(3);
-  return r;
-}
-
 }  // namespace
 
 // ------------------------------------------------------------------ data
@@ -119,6 +102,7 @@ std::vector<const json*> App::all_munis() {
 // ------------------------------------------------------------------ card parts
 
 bool App::close_button() {
+  if (in_kept_) return false;  // a kept card has its own header
   const ImVec2 keep = ImGui::GetCursorPos();
   const float w = ImGui::GetWindowContentRegionMax().x;
   ImGui::SetCursorPos(ImVec2(w - 22, keep.y - 2));
@@ -133,6 +117,15 @@ bool App::close_button() {
 
 void App::card_head(const char* tag, const char* tag_colour, const char* kind, const std::string& title, const std::string& sub,
                     const std::string& data_line) {
+  if (in_kept_) {  // the kept header already names it; keep the sub line for context
+    if (!sub.empty()) {
+      ImGui::PushTextWrapPos(0);
+      ImGui::TextColored(col(kMuted), "%s", sub.c_str());
+      ImGui::PopTextWrapPos();
+    }
+    (void)tag, (void)tag_colour, (void)kind, (void)title, (void)data_line;
+    return;
+  }
   auto* dl = ImGui::GetWindowDrawList();
   const ImVec2 p = ImGui::GetCursorScreenPos();
   const ImVec2 ts = font_mono_->CalcTextSizeA(10.5f, FLT_MAX, 0, tag);
@@ -158,24 +151,55 @@ void App::card_head(const char* tag, const char* tag_colour, const char* kind, c
 }
 
 void App::fn_strip(const std::vector<std::string>& codes) {
+  if (in_kept_) return;
+  // the first four functions show; the rest fold under More (the website's related-functions menu)
+  constexpr size_t kShown = 4;
   ImGui::Spacing();
   ImGui::PushFont(font_mono_);
   ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(7, 4));
   ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 3);
-  const float avail = ImGui::GetContentRegionAvail().x;
-  float x = 0;
-  for (const auto& code : codes) {
+  auto label = [&](const std::string& code) {
+    if (code == "KEEP" && is_kept(cards_.back())) return std::string("KEPT");
+    return code;
+  };
+  auto tip = [&](const std::string& code) {
+    const auto* s = commands::find(code);
+    if (!s) return;
+    ImGui::SetTooltip("%s \xc2\xb7 type %s%s", s->about, code.c_str(), s->ready ? "" : "\nComes in a later milestone");
+  };
+  for (size_t i = 0; i < codes.size() && i < kShown; ++i) {
+    const auto& code = codes[i];
     const auto* s = commands::find(code);
     const bool ready = s && s->ready;
-    const float bw = ImGui::CalcTextSize(code.c_str()).x + 14;
-    if (x > 0 && x + bw > avail) x = 0;
-    else if (x > 0) ImGui::SameLine(0, 4);
-    x += bw + 4;
+    const std::string l = label(code);
+    if (i) ImGui::SameLine(0, 4);
     ImGui::PushID(code.c_str());
-    if (chip(code.c_str(), false, ImVec2(bw, 0), ready)) run_fn(code);
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && s)
-      ImGui::SetTooltip("%s%s", s->about, ready ? "" : "\nComes in a later milestone");
+    if (chip(l.c_str(), l == "KEPT", ImVec2(ImGui::CalcTextSize(l.c_str()).x + 14, 0), ready)) run_fn(code);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) tip(code);
     ImGui::PopID();
+  }
+  if (codes.size() > kShown) {
+    ImGui::SameLine(0, 4);
+    if (chip("More   ", false, ImVec2(ImGui::CalcTextSize("More   ").x + 14, 0))) ImGui::OpenPopup("##morefn");
+    {  // a small down chevron in the gap after "More"
+      const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+      const float cx = b.x - 13, cy = (a.y + b.y) / 2;
+      ImGui::GetWindowDrawList()->AddTriangleFilled(ImVec2(cx - 3.5f, cy - 1.5f), ImVec2(cx + 3.5f, cy - 1.5f),
+                                                    ImVec2(cx, cy + 2.5f), u32(kMuted));
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%zu more functions", codes.size() - kShown);
+    if (ImGui::BeginPopup("##morefn")) {
+      for (size_t i = kShown; i < codes.size(); ++i) {
+        const auto* s = commands::find(codes[i]);
+        const bool ready = s && s->ready;
+        ImGui::BeginDisabled(!ready);
+        char line[160];
+        std::snprintf(line, sizeof line, "%-7s %s", codes[i].c_str(), s ? s->about : "");
+        if (ImGui::Selectable(line)) run_fn(codes[i]);
+        ImGui::EndDisabled();
+      }
+      ImGui::EndPopup();
+    }
   }
   ImGui::PopStyleVar(2);
   ImGui::PopFont();
@@ -210,7 +234,7 @@ void App::ui_home() {
     ImGui::TextColored(col(kWarn), "%d of %d layers in this topic need their data packs, which come with milestone B.", waiting,
                        drawn + waiting);
   ImGui::PopTextWrapPos();
-  fn_strip({"FIND", "RANK", "LIST", "AREAS", "SAVE", "PNG"});
+  fn_strip({"FIND", "RANK", "CMP", "AREAS", "HIST", "SAVE", "PNG"});
 
   section(font_mono_, "TOPICS");
   ImGui::PushFont(font_mono_);
@@ -266,7 +290,7 @@ void App::ui_area(const std::string& id) {
     return;
   }
   // breadcrumb
-  if (a.contains("breadcrumb") && !a["breadcrumb"].empty()) {
+  if (!in_kept_ && a.contains("breadcrumb") && !a["breadcrumb"].empty()) {
     ImGui::PushFont(font_small_);
     bool first = true;
     for (const auto& b : a["breadcrumb"]) {
@@ -322,7 +346,8 @@ void App::ui_area(const std::string& id) {
       ImGui::Dummy(ImVec2(w, 50));
     }
   }
-  fn_strip({"DES", "HERE", "NEAR", "REACH", "MEAS", "WATCH", "GO", "COPY", "PNG"});
+  if (kind == "PROV" || kind == "COUNTRY") fn_strip({"NEAR", "KEEP", "WATCH", "REPORT", "GO", "HERE", "MEAS", "COPY", "PNG"});
+  else fn_strip({"NEAR", "CMP", "WATCH", "KEEP", "REPORT", "CHK", "GO", "HERE", "MEAS", "REACH", "COPY", "PNG"});
 
   // the parts of this area, ranked by the measure of the topic
   if (a.contains("children") && !a["children"].empty()) {
@@ -365,7 +390,7 @@ void App::ui_facility(Card& c) {
       if (!s("muni").empty()) sub += (sub.empty() ? "" : " \xc2\xb7 ") + s("muni");
       card_head("PLOTS", g ? g->colour : kAccent, "PLOT", s("label").empty() ? "Plot" : s("label"), sub,
                 "Cadastre: Surveyor-General; values: municipal valuation rolls");
-      fn_strip({"HERE", "NEAR", "REACH", "MEAS", "GO", "COPY", "PNG"});
+      fn_strip({"NEAR", "KEEP", "CHK", "REPORT", "GO", "MEAS", "REACH", "COPY", "PNG"});
       const std::pair<const char*, std::string> rows[] = {
           {"Market value", rand("value")},  {"Roll", s("roll")},          {"Category", s("cat")},
           {"Use", s("use")},                {"Last sale", rand("sale")},  {"Sale date", s("sale_date")},
@@ -387,7 +412,7 @@ void App::ui_facility(Card& c) {
     if (tag.size() > 6) tag = tag.substr(0, 5);
     card_head(tag.c_str(), g ? g->colour : kAccent, d ? upper(d->name).c_str() : lid.c_str(), p.value("name", d ? d->name : "Feature"),
               p.value("detail", std::string()), d ? d->about : "");
-    fn_strip({"HERE", "NEAR", "REACH", "MEAS", "GO", "COPY", "PNG"});
+    fn_strip({"NEAR", "KEEP", "CHK", "REPORT", "GO", "MEAS", "REACH", "COPY", "PNG"});
     char ll[64];
     std::snprintf(ll, sizeof ll, "%.5f, %.5f", c.lat, c.lon);
     kv_row("Position", ll);
@@ -429,7 +454,7 @@ void App::ui_facility(Card& c) {
   }
   card_head(tag.c_str(), tcs.c_str(), station ? "POWER STATION" : "SUBSTATION", p.value("name", c.id), sub,
             "OpenStreetMap power data, NTCSA GCCA 2025");
-  fn_strip({"DES", "HERE", "NEAR", "TR", "FAIL", "FEED", "PATH", "REACH", "MEAS", "WATCH", "GO", "COPY", "PNG"});
+  fn_strip({"NEAR", "WATCH", "KEEP", "TR", "REPORT", "CHK", "FAIL", "FEED", "PATH", "GO", "MEAS", "REACH", "COPY", "PNG"});
 
   // tabs
   static const char* tabs[] = {"Details", "Connections", "Area served"};
@@ -483,7 +508,7 @@ void App::ui_spot(Card& c) {
   std::string sub = ll;
   if (pv) sub = pv->str("name") + " \xc2\xb7 " + sub;
   card_head("SPOT", kAccent, "WHAT IS HERE", title, sub, "");
-  fn_strip({"NEAR", "REACH", "MEAS", "GO", "COPY", "PNG"});
+  fn_strip({"NEAR", "KEEP", "REPORT", "WATCH", "MEAS", "REACH", "GO", "COPY", "PNG"});
 
   if (m) {
     const std::string id = m->str("id");
@@ -502,7 +527,10 @@ void App::ui_spot(Card& c) {
   }
   // the website's spot summary from the Find data: town, dam, free capacity, airport, port, your conditions
   if (fdata_) {
-    const auto lines = find::spot(*fdata_, c.lon, c.lat, rules_);
+    auto lines = find::spot(*fdata_, c.lon, c.lat, rules_);
+    // the municipality block above already gives people and property
+    lines.erase(std::remove_if(lines.begin(), lines.end(), [](const auto& l) { return l.first == "People and property"; }),
+                lines.end());
     if (!lines.empty()) section(font_mono_, "AROUND THIS SPOT");
     for (const auto& [head, text] : lines) {
       ImGui::PushTextWrapPos(0);
@@ -512,6 +540,37 @@ void App::ui_spot(Card& c) {
       ImGui::TextColored(col(kFaint), "%s", head.c_str());
       ImGui::PopFont();
       ImGui::Spacing();
+    }
+  }
+  // jobs, income and services in the municipality (Census 2011), solar yield
+  if (fdata_)
+    if (const auto* fm = fdata_->muni_at(c.lon, c.lat); fm && fm->un >= 0) {
+      section(font_mono_, ("JOBS AND SERVICES IN " + upper(fm->name) + " (CENSUS 2011)").c_str());
+      for (const char* k : {"un", "inc", "mat", "net", "inf", "wat", "pv"})
+        if (const auto* ms = find::measure(k); ms && fm->*ms->field >= 0) kv_row(ms->label, find::fmt_measure(*ms, fm->*ms->field));
+    }
+  // the nearest school, clinic and police station among the base map's loaded landmarks
+  {
+    struct Best {
+      double km = 1e9;
+      std::string name;
+    } sch, cli, hos, pol;
+    map_->points("base", "poi", [&](const mvt::Feature& f, double px, double py) {
+      const std::string k = f.str("k");
+      Best* b = k == "school" ? &sch : k == "clinic" ? &cli : k == "hospital" ? &hos : k == "police" ? &pol : nullptr;
+      if (!b) return;
+      const double d = km_between(c.lon, c.lat, geo::lon_of(px), geo::lat_of(py));
+      if (d < b->km) b->km = d, b->name = f.str("name");
+    });
+    if (sch.km < 1e9 || cli.km < 1e9 || hos.km < 1e9 || pol.km < 1e9) {
+      section(font_mono_, "SERVICES NEARBY (ON THE MAP)");
+      auto line = [&](const char* l, const Best& b, const char* unnamed) {
+        if (b.km < 1e9) kv_row(l, (b.name.empty() ? std::string(unnamed) : b.name) + " \xc2\xb7 " + fmt_km(b.km));
+      };
+      line("Nearest school", sch, "School");
+      line("Nearest clinic", cli, "Clinic");
+      line("Nearest hospital", hos, "Hospital");
+      line("Nearest police", pol, "Police station");
     }
   }
   // the nearest grid points among what the map has loaded
@@ -668,15 +727,26 @@ void App::ui_panel_find() {
     panel_ = Panel::None;
     return;
   }
-  card_head(find_rank_ ? "RANK" : "FIND", kAccent, find_rank_ ? "SHIFT N" : "KEY N",
-            find_rank_ ? "Rank what's in view" : "Find places where ...", "", "");
+  static const char* const heads[3][3] = {{"FIND", "KEY N", "Find places where ..."},
+                                          {"RANK", "SHIFT N", "Rank what's in view"},
+                                          {"CMP", "TYPE CMP", "Compare municipalities"}};
+  card_head(heads[find_tab_][0], kAccent, heads[find_tab_][1], heads[find_tab_][2], "", "");
   ImGui::PushFont(font_mono_);
-  const float tw = (ImGui::GetContentRegionAvail().x - 4) / 2;
-  if (chip("Find places where ...", !find_rank_, ImVec2(tw, 26))) find_rank_ = false;
-  ImGui::SameLine(0, 4);
-  if (chip("Rank what's in view", find_rank_, ImVec2(tw, 26))) find_rank_ = true;
+  {
+    const float tw = (ImGui::GetContentRegionAvail().x - 8) / 3;
+    const std::string cl = "Compare" + (cmp_.empty() ? std::string() : " " + std::to_string(cmp_.size()));
+    const char* labels[3] = {"Find", "Rank", cl.c_str()};
+    for (int i = 0; i < 3; ++i) {
+      if (i) ImGui::SameLine(0, 4);
+      if (chip(labels[i], find_tab_ == i, ImVec2(tw, 26))) find_tab_ = i;
+    }
+  }
   ImGui::PopFont();
   ImGui::Spacing();
+  if (find_tab_ == 2) {
+    ui_compare();
+    return;
+  }
   auto copy_csv = [&](const std::vector<Row>& rows) {
     auto q = [](const std::string& v) {
       if (v.find_first_of("\",") == std::string::npos) return v;
@@ -690,7 +760,7 @@ void App::ui_panel_find() {
     toast(std::to_string(rows.size()) + " rows copied as CSV");
   };
 
-  if (find_rank_) {
+  if (find_tab_ == 1) {
     // Rank: the website's RANK list; substations and power stations come from the drawn grid
     const auto& defs = find::rank_defs();
     const find::RankDef* cur = &defs[0];
@@ -812,7 +882,8 @@ void App::ui_panel_find() {
   const float hw = (ImGui::GetContentRegionAvail().x - 6) / 2;
   ImGui::SetNextItemWidth(hw);
   if (ImGui::BeginCombo("##add", "+ Add a condition")) {
-    for (const char* g : {"People", "Property", "Elections", "Water", "Places", "Power", "Transport"}) {
+    for (const char* g : {"People", "Property", "Jobs and income", "Education", "Services", "Elections", "Water", "Places",
+                          "Power", "Transport"}) {
       ImGui::TextColored(col(kFaint), "%s", g);
       for (const auto& def : find::defs())
         if (std::string(def.group) == g && ImGui::Selectable(def.label)) {
@@ -863,6 +934,14 @@ void App::ui_panel_find() {
     set_rules({});
     ImGui::PopFont();
     return;
+  }
+  if (rows.size() >= 2) {
+    ImGui::SameLine(0, 4);
+    if (chip("Compare top 4", false, ImVec2(112, 20))) {
+      cmp_.clear();
+      for (size_t i = 0; i < rows.size() && i < 4; ++i) cmp_.push_back(rows[i].area);
+      find_tab_ = 2;
+    }
   }
   ImGui::PopFont();
   if (rows.empty()) ImGui::TextColored(col(kFaint), "No municipality meets every condition. Loosen one.");
@@ -1099,7 +1178,58 @@ void App::ui_panel_keys() {
     panel_ = Panel::None;
     return;
   }
-  card_head("KEYS", kAccent, "? OR F1", "Keys and commands", "", "");
+  if (!help_code_.empty()) {
+    // HELP CODE: one function explained
+    const auto* sp = commands::find(help_code_);
+    card_head("HELP", kAccent, "FUNCTION", help_code_, sp ? sp->about : "No function has this code.", "");
+    if (sp) {
+      if (sp->arg[0]) {
+        section(font_mono_, "TYPE");
+        ImGui::PushFont(font_mono_);
+        ImGui::TextColored(col(kAccent), "%s %s", sp->code, sp->arg);
+        ImGui::PopFont();
+      }
+      static const std::map<std::string, std::pair<const char*, const char*>> more = {
+          {"KEEP", {"apollo KEEP", "Keeps the open card above the next one you open. Two at most; KEEP again lets it go."}},
+          {"CMP", {"tshwane CMP", "Adds the open municipality to Compare (four at most) and shows the table, with the "
+                                  "highest and lowest figure in each row marked. Copy it as CSV."}},
+          {"REPORT", {"stellenbosch REPORT", "Saves an HTML page with the map as you see it and every figure on the "
+                                             "card, in your Documents folder. Open it and print to PDF."}},
+          {"NEAR", {"NEAR 50", "Towns, schools, clinics, police, dams, airports, grid room and power stations within "
+                               "10, 25, 50 or 100 km of the open card, nearest first."}},
+          {"CHK", {"hermanus CHK", "One card for a place: the municipality's people, property, jobs, income and "
+                                   "services, plus the nearest town, dam, grid room, airport and port."}},
+          {"HIST", {"HIST", "Every change this session, newest first. Ctrl Z undoes, Ctrl Shift Z redoes; click a step "
+                            "to go back to just before it."}},
+          {"FIND", {"FIND solar", "Conditions across topics, tested per municipality. Presets start you off."}},
+          {"RANK", {"RANK unemployment", "Ranks what is in view; the list follows the map."}},
+      };
+      if (auto it = more.find(help_code_); it != more.end()) {
+        section(font_mono_, "EXAMPLE");
+        ImGui::PushFont(font_mono_);
+        ImGui::TextColored(col(kInk), "%s", it->second.first);
+        ImGui::PopFont();
+        ImGui::Spacing();
+        ImGui::PushTextWrapPos(0);
+        ImGui::TextColored(col(kMuted), "%s", it->second.second);
+        ImGui::PopTextWrapPos();
+      }
+      ImGui::Spacing();
+      ImGui::PushFont(font_mono_);
+      if (chip(("Run " + help_code_).c_str(), false, ImVec2(0, 26), sp->ready)) {
+        const std::string c = help_code_;
+        help_code_.clear();
+        run_command(c);
+        ImGui::PopFont();
+        return;
+      }
+      ImGui::PopFont();
+    }
+    ImGui::Spacing();
+    if (ImGui::SmallButton("All keys and commands")) help_code_.clear();
+    return;
+  }
+  card_head("KEYS", kAccent, "? OR F1", "Keys and commands", "HELP CODE explains one function, for example HELP CMP.", "");
   section(font_mono_, "KEYS");
   static const std::pair<const char*, const char*> keys[] = {
       {"1 to 0", "Topics: start, grid, vote, water, plots, land, places, move, nature, risk"},
@@ -1115,6 +1245,9 @@ void App::ui_panel_keys() {
       {"+ - Home", "Zoom in, out, whole country"},
       {"Arrows", "Pan"},
       {"Esc", "Close the top card or panel"},
+      {"Ctrl Z", "Undo; Ctrl Shift Z or Ctrl Y redoes"},
+      {"Shift F", "Clear every filter"},
+      {"Ctrl drag", "Tilt the map (3D)"},
   };
   for (const auto& [k, v] : keys) {
     const ImVec2 p = ImGui::GetCursorScreenPos();
@@ -1136,6 +1269,11 @@ void App::ui_panel_keys() {
     ImGui::PushTextWrapPos(0);
     ImGui::TextColored(s.ready ? col(kInk) : col(kFaint), "%s%s", s.about, s.ready ? "" : " (later)");
     ImGui::PopTextWrapPos();
+    const ImVec2 q = ImGui::GetCursorScreenPos();
+    if (ImGui::IsMouseHoveringRect(p, ImVec2(p.x + ImGui::GetContentRegionAvail().x, q.y)) && ImGui::IsWindowHovered()) {
+      ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+      if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) help_code_ = s.code;
+    }
   }
 }
 

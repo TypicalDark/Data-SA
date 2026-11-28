@@ -670,6 +670,22 @@ const mvt::Feature* MapRenderer::pick(double wx, double wy, const std::string& l
   return nullptr;
 }
 
+void MapRenderer::points(const std::string& pack, const std::string& layer,
+                         const std::function<void(const mvt::Feature&, double, double)>& fn) const {
+  for (const auto& k : keys_) {
+    if (k.pack != pack) continue;
+    auto it = tiles_.find(k);
+    if (it == tiles_.end() || !it->second.tile) continue;
+    const auto* l = it->second.tile->layer(layer);
+    if (!l) continue;
+    const double n = double(1u << k.id.z);
+    for (const auto& f : l->features)
+      if (f.type == mvt::GeomType::Point)
+        for (const auto& part : f.parts)
+          for (const auto& p : part) fn(f, (k.id.x + double(p.x)) / n, (k.id.y + double(p.y)) / n);
+  }
+}
+
 std::optional<MapRenderer::WebHit> MapRenderer::pick_web(double sx, double sy, const geo::Camera& cam) const {
   double wx, wy;
   cam.to_world(sx, sy, wx, wy);
